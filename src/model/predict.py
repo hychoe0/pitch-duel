@@ -42,6 +42,7 @@ import json
 import warnings
 from pathlib import Path
 
+import joblib
 import numpy as np
 import xgboost as xgb
 
@@ -70,17 +71,17 @@ _cache: dict = {}
 
 def load_model(model_dir: Path = MODEL_DIR) -> tuple:
     """
-    Load and cache (model, feature_cols, encodings).
+    Load and cache (model, feature_cols, encodings, calibrator).
     Uses XGBoost native JSON format for version safety.
     """
     if _cache:
-        return _cache["model"], _cache["feature_cols"], _cache["encodings"]
+        return _cache["model"], _cache["feature_cols"], _cache["encodings"], _cache["calibrator"]
 
     model_path = model_dir / "pitch_duel_xgb.json"
     if not model_path.exists():
         raise FileNotFoundError(f"No trained model at {model_path}. Run train.py first.")
 
-    model = xgb.XGBClassifier()
+    model = xgb.XGBRegressor()
     model.load_model(str(model_path))
 
     with open(model_dir / "feature_cols.json") as f:
@@ -89,8 +90,12 @@ def load_model(model_dir: Path = MODEL_DIR) -> tuple:
     with open(model_dir / "encodings.json") as f:
         encodings = json.load(f)
 
-    _cache.update({"model": model, "feature_cols": feature_cols, "encodings": encodings})
-    return model, feature_cols, encodings
+    calibrator_path = model_dir / "calibrator.pkl"
+    calibrator = joblib.load(calibrator_path) if calibrator_path.exists() else None
+
+    _cache.update({"model": model, "feature_cols": feature_cols,
+                   "encodings": encodings, "calibrator": calibrator})
+    return model, feature_cols, encodings, calibrator
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +112,26 @@ def validate_pitch_dict(pitch: dict) -> None:
 # Encoding
 # ---------------------------------------------------------------------------
 
+def _era_flag_enc(game_date) -> int:
+    """Mirror the era flag logic from preprocess.py for live prediction."""
+    import datetime
+    if isinstance(game_date, str):
+        game_date = datetime.date.fromisoformat(game_date)
+    crackdown = datetime.date(2021, 6, 21)
+    crackdown_end = datetime.date(2022, 1, 1)
+    pitch_clock = datetime.date(2023, 1, 1)
+    if game_date < crackdown:
+        return 0  # pre_crackdown
+    if game_date < crackdown_end:
+        return 1  # post_crackdown
+    if game_date < pitch_clock:
+        return 2  # ambiguous
+    return 3      # pitch_clock
+
+
 def encode_pitch_dict(pitch: dict, encodings: dict) -> dict:
     """Apply integer encodings to raw pitch dict. Returns new dict with _enc keys."""
+    import datetime
     ptm = encodings["PITCH_TYPE_MAP"]
     prm = encodings["PREV_RESULT_MAP"]
 
@@ -126,6 +149,14 @@ def encode_pitch_dict(pitch: dict, encodings: dict) -> dict:
     encoded["on_1b_flag"] = int(bool(pitch.get("on_1b")))
     encoded["on_2b_flag"] = int(bool(pitch.get("on_2b")))
     encoded["on_3b_flag"] = int(bool(pitch.get("on_3b")))
+
+    # Derived features that must match preprocessing
+    release_speed = pitch["release_speed"]
+    release_spin_rate = pitch.get("release_spin_rate", 0) or 0
+    encoded["spin_to_velo_ratio"] = release_spin_rate / release_speed if release_speed else 0.0
+
+    game_date = pitch.get("game_date", datetime.date.today())
+    encoded["era_flag_enc"] = _era_flag_enc(game_date)
 
     # Warn on unknown pitch types so callers know to update PITCH_TYPE_MAP
     if pitch["pitch_type"] not in ptm:
@@ -210,7 +241,7 @@ def predict_hit_probability(
     model_dir: Path = MODEL_DIR,
 ) -> dict:
     """
-    Predict hit probability for a single pitch against a named hitter.
+    Predict xwOBA for a single pitch against a named hitter.
 
     Args:
         pitch: dict with all raw pitch keys (see REQUIRED_RAW_KEYS)
@@ -219,22 +250,28 @@ def predict_hit_probability(
 
     Returns:
         {
-            'hit_probability': float,    # 0.0–1.0
+            'xwoba_prediction': float,       # calibrated xwOBA (0.0–2.0 approx)
+            'xwoba_prediction_raw': float,   # uncalibrated regressor output
+            'hit_probability': float,        # binarized: 1.0 if xwoba > 0.15 else 0.0
             'hitter': str,
             'pitch_type': str,
-            'count': str,               # e.g. "1-2"
+            'count': str,                    # e.g. "1-2"
             'is_thin_sample': bool,
             'used_fallback': bool,
         }
     """
     validate_pitch_dict(pitch)
-    model, feature_cols, encodings = load_model(model_dir)
+    model, feature_cols, encodings, calibrator = load_model(model_dir)
     hitter_features, is_thin, used_fallback = _resolve_hitter_profile(hitter_name)
     row = build_feature_row(pitch, hitter_features, feature_cols, encodings)
-    prob = float(model.predict_proba(row)[0][1])
+    raw_xwoba = float(max(0.0, model.predict(row)[0]))
+    cal_xwoba = float(calibrator.predict([raw_xwoba])[0]) if calibrator is not None else raw_xwoba
+    cal_xwoba = max(0.0, cal_xwoba)
 
     return {
-        "hit_probability": round(prob, 4),
+        "xwoba_prediction":     round(cal_xwoba, 4),
+        "xwoba_prediction_raw": round(raw_xwoba, 4),
+        "hit_probability":      1.0 if cal_xwoba > 0.15 else 0.0,
         "hitter": hitter_name,
         "pitch_type": pitch["pitch_type"],
         "count": f"{pitch['balls']}-{pitch['strikes']}",
@@ -280,7 +317,7 @@ if __name__ == "__main__":
     }
 
     result = predict_hit_probability(sample_pitch, args.hitter)
-    print(f"\nHit probability for {result['hitter']}: {result['hit_probability']:.1%}")
+    print(f"\nxwOBA prediction for {result['hitter']}: {result['xwoba_prediction']:.4f}")
     print(f"  Pitch: {result['pitch_type']}  |  Count: {result['count']}")
     if result["used_fallback"]:
         print("  (league-average profile used — hitter not in database)")

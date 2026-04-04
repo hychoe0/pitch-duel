@@ -33,9 +33,10 @@ PITCH_TYPE_MAP = {
     "EP": 10,  # eephus
     "FO": 11,  # forkball
     "SC": 12,  # screwball
-    "SV": 13,  # sweeper
+    "SV": 13,  # slurve (2023+ Statcast code; pre-2023 SV = sweeper → use ST)
     "FIRST_PITCH": 14,  # sentinel: no previous pitch
-    "OTHER": 15,        # catch-all for unmapped types
+    "ST": 16,  # sweeper (2023+ Statcast code; pre-2023 sweepers were labeled SV)
+    "OTHER": 17,        # catch-all for unmapped types
 }
 
 PREV_RESULT_MAP = {
@@ -115,7 +116,48 @@ HITTER_PROFILE_FEATURES = [
     "p_throws_enc",
 ]
 
-ALL_FEATURES = PITCH_FEATURES + CONTEXT_FEATURES + HITTER_PROFILE_FEATURES
+HITTER_PITCH_TYPE_FEATURES = [
+    "hitter_contact_rate_FF",
+    "hitter_contact_rate_CH",
+    "hitter_contact_rate_CU",
+    "hitter_contact_rate_FC",
+    "hitter_contact_rate_KN",
+    "hitter_contact_rate_SC",
+    "hitter_contact_rate_SI",
+    "hitter_contact_rate_SL",
+    "hitter_contact_rate_SV",
+    "hitter_contact_rate_FS",
+    "hitter_contact_rate_ST",
+]
+
+HITTER_ZONE_FEATURES = [
+    "hitter_swing_rate_z1",  "hitter_swing_rate_z2",  "hitter_swing_rate_z3",
+    "hitter_swing_rate_z4",  "hitter_swing_rate_z5",  "hitter_swing_rate_z6",
+    "hitter_swing_rate_z7",  "hitter_swing_rate_z8",  "hitter_swing_rate_z9",
+    "hitter_swing_rate_z11", "hitter_swing_rate_z12",
+    "hitter_swing_rate_z13", "hitter_swing_rate_z14",
+    "hitter_whiff_rate_z1",  "hitter_whiff_rate_z2",  "hitter_whiff_rate_z3",
+    "hitter_whiff_rate_z4",  "hitter_whiff_rate_z5",  "hitter_whiff_rate_z6",
+    "hitter_whiff_rate_z7",  "hitter_whiff_rate_z8",  "hitter_whiff_rate_z9",
+    "hitter_whiff_rate_z11", "hitter_whiff_rate_z12",
+    "hitter_whiff_rate_z13", "hitter_whiff_rate_z14",
+]
+
+HITTER_FAMILY_FEATURES = [
+    "hitter_swing_rate_fastball", "hitter_swing_rate_breaking",
+    "hitter_swing_rate_offspeed", "hitter_swing_rate_other",
+    "hitter_whiff_rate_fastball", "hitter_whiff_rate_breaking",
+    "hitter_whiff_rate_offspeed", "hitter_whiff_rate_other",
+]
+
+ALL_FEATURES = (
+    PITCH_FEATURES
+    + CONTEXT_FEATURES
+    + HITTER_PROFILE_FEATURES
+    + HITTER_PITCH_TYPE_FEATURES
+    + HITTER_ZONE_FEATURES
+    + HITTER_FAMILY_FEATURES
+)
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +344,8 @@ def impute_pitcher_medians(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def split_data(df: pd.DataFrame) -> tuple:
-    """Temporal split: train < 2023, test >= 2023."""
-    cutoff = pd.Timestamp("2023-01-01")
+    """Temporal split: train < 2025, test >= 2025."""
+    cutoff = pd.Timestamp("2025-01-01")
     train = df[df["game_date"] < cutoff].copy()
     test = df[df["game_date"] >= cutoff].copy()
     print(f"Train: {len(train):,} rows  |  Test: {len(test):,} rows")
@@ -338,6 +380,7 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     df = impute_pitcher_medians(df)
 
     df["hit"] = make_target(df)
+    df["xwoba"] = df["estimated_woba_using_speedangle"].fillna(0.0)
     df["score_diff"] = make_score_diff(df)
 
     df = encode_pitch_types(df)

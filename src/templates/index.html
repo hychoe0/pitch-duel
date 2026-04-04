@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pitch Duel</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface2: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #7d8590;
+  --blue: #388bfd;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --orange: #db6d28;
+  --red: #f85149;
+  --radius: 8px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+header h1 { font-size: 20px; font-weight: 700; letter-spacing: 2px; color: var(--text); }
+header span { color: var(--text-muted); font-size: 13px; }
+
+/* ── Setup bar ───────────────────────────────────────── */
+#setup-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.setup-field { display: flex; flex-direction: column; gap: 4px; }
+.setup-field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+
+.setup-field input[type="text"],
+.setup-field input[type="number"] {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  width: 100%;
+}
+.setup-field input[type="text"] { width: 200px; }
+.setup-field input[type="number"] { width: 72px; }
+.setup-field input:focus { outline: none; border-color: var(--blue); }
+
+/* hitter autocomplete */
+#hitter-wrap { position: relative; }
+#hitter-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  display: none;
+}
+#hitter-suggestions div {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#hitter-suggestions div:hover { background: var(--border); }
+
+/* Toggle buttons (R/L) */
+.toggle-group { display: flex; gap: 2px; }
+.toggle-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: all 0.15s;
+}
+.toggle-btn.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+/* Runner toggles */
+.runner-group { display: flex; gap: 4px; }
+.runner-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.runner-btn.active { background: var(--yellow); border-color: var(--yellow); color: #000; }
+
+.setup-divider { width: 1px; background: var(--border); height: 36px; align-self: flex-end; margin: 0 4px; }
+
+#new-ab-btn {
+  background: var(--blue);
+  border: none;
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#new-ab-btn:hover { opacity: 0.85; }
+
+/* ── Count bar ───────────────────────────────────────── */
+#count-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.count-group { display: flex; align-items: center; gap: 8px; }
+.count-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); width: 14px; }
+.count-dots { display: flex; gap: 5px; }
+.dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: transparent;
+  transition: all 0.15s;
+}
+.dot.ball.on   { background: var(--green);  border-color: var(--green); }
+.dot.strike.on { background: var(--red);    border-color: var(--red); }
+#pitch-num-label { color: var(--text-muted); font-size: 13px; margin-left: auto; }
+#at-bat-status { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
+#at-bat-status.over { background: #21262d; color: var(--text-muted); }
+
+/* ── Main grid ───────────────────────────────────────── */
+#main { display: grid; grid-template-columns: 380px 1fr; gap: 0; height: calc(100vh - 130px); overflow: hidden; }
+
+/* ── Panels ──────────────────────────────────────────── */
+.panel { overflow-y: auto; padding: 20px; border-right: 1px solid var(--border); }
+.panel:last-child { border-right: none; }
+.panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 16px; }
+
+/* ── Pitch type selector ─────────────────────────────── */
+#pitch-types { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+.pt-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  min-width: 40px;
+  text-align: center;
+}
+.pt-btn:hover { border-color: var(--blue); color: var(--text); }
+.pt-btn.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+/* ── Slider fields ───────────────────────────────────── */
+.slider-field { margin-bottom: 14px; }
+.slider-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.slider-header label { font-size: 12px; color: var(--text-muted); }
+.slider-header input[type="number"] {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 2px 6px;
+  font-size: 12px;
+  width: 72px;
+  text-align: right;
+}
+.slider-header input[type="number"]:focus { outline: none; border-color: var(--blue); }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--blue);
+  cursor: pointer;
+}
+
+/* ── Compact input row ───────────────────────────────── */
+.compact-row { display: flex; gap: 10px; margin-bottom: 14px; }
+.compact-field { flex: 1; }
+.compact-field label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.compact-field input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.compact-field input:focus { outline: none; border-color: var(--blue); }
+
+/* ── Strike zone ─────────────────────────────────────── */
+#zone-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+#zone-wrap { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+#zone-svg { cursor: crosshair; flex-shrink: 0; }
+.location-inputs { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+.location-inputs .compact-field input { width: 80px; }
+
+/* ── Throw button ────────────────────────────────────── */
+#throw-btn {
+  width: 100%;
+  background: var(--green);
+  border: none;
+  color: #000;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: opacity 0.15s;
+}
+#throw-btn:hover { opacity: 0.85; }
+#throw-btn:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; opacity: 1; }
+
+/* ── Result display ──────────────────────────────────── */
+#result-display {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  margin-bottom: 20px;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+#result-display.placeholder { color: var(--text-muted); font-size: 13px; }
+#prob-value { font-size: 56px; font-weight: 800; line-height: 1; }
+#prob-label { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); }
+#prob-bar-wrap { width: 100%; background: var(--border); border-radius: 4px; height: 6px; margin-top: 4px; }
+#prob-bar { height: 6px; border-radius: 4px; transition: width 0.4s ease, background 0.4s ease; }
+#result-meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+#result-warning { font-size: 11px; color: var(--yellow); margin-top: 4px; }
+
+/* ── Outcome section ─────────────────────────────────── */
+#outcome-section { margin-bottom: 20px; display: none; }
+#outcome-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 10px; }
+.outcome-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.oc-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+.oc-btn:hover { border-color: var(--blue); color: var(--blue); }
+.oc-btn.ball    { border-color: var(--green);  color: var(--green); }
+.oc-btn.strike  { border-color: var(--red);    color: var(--red); }
+.oc-btn.foul    { border-color: var(--yellow); color: var(--yellow); }
+.oc-btn.hit     { border-color: var(--blue);   color: var(--blue); }
+.oc-btn.out     { border-color: var(--text-muted); color: var(--text-muted); }
+
+.outcome-group-label { grid-column: 1 / -1; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+/* ── Pitch history ───────────────────────────────────── */
+#history-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 10px; }
+#history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#history-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+#history-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
+#history-table tr:last-child td { border-bottom: none; }
+#history-table .prob-cell { font-weight: 700; }
+.oc-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+
+/* ── Error toast ─────────────────────────────────────── */
+#error-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #3d1f1f;
+  border: 1px solid var(--red);
+  color: var(--text);
+  padding: 10px 20px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  display: none;
+  z-index: 999;
+  max-width: 480px;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <h1>⚾ PITCH DUEL</h1>
+  <span>Hit probability simulator</span>
+</header>
+
+<!-- Setup bar -->
+<div id="setup-bar">
+  <div class="setup-field">
+    <label>Hitter</label>
+    <div id="hitter-wrap">
+      <input type="text" id="hitter-input" placeholder="e.g. ohtani, shohei" autocomplete="off">
+      <div id="hitter-suggestions"></div>
+    </div>
+  </div>
+
+  <div class="setup-field">
+    <label>P Throws</label>
+    <div class="toggle-group">
+      <button class="toggle-btn active" data-group="p_throws" data-val="R">R</button>
+      <button class="toggle-btn"        data-group="p_throws" data-val="L">L</button>
+    </div>
+  </div>
+
+  <div class="setup-field">
+    <label>Batter Stands</label>
+    <div class="toggle-group">
+      <button class="toggle-btn active" data-group="stand" data-val="R">R</button>
+      <button class="toggle-btn"        data-group="stand" data-val="L">L</button>
+    </div>
+  </div>
+
+  <div class="setup-divider"></div>
+
+  <div class="setup-field">
+    <label>Inning</label>
+    <input type="number" id="inp-inning" value="1" min="1" max="12">
+  </div>
+
+  <div class="setup-field">
+    <label>Score Diff</label>
+    <input type="number" id="inp-score-diff" value="0" min="-20" max="20" title="Positive = batting team leads">
+  </div>
+
+  <div class="setup-field">
+    <label>Runners</label>
+    <div class="runner-group">
+      <button class="runner-btn" data-base="on_1b">1B</button>
+      <button class="runner-btn" data-base="on_2b">2B</button>
+      <button class="runner-btn" data-base="on_3b">3B</button>
+    </div>
+  </div>
+
+  <button id="new-ab-btn">New At-Bat</button>
+</div>
+
+<!-- Count bar -->
+<div id="count-bar">
+  <div class="count-group">
+    <span class="count-label">B</span>
+    <div class="count-dots" id="ball-dots">
+      <div class="dot ball" id="b0"></div>
+      <div class="dot ball" id="b1"></div>
+      <div class="dot ball" id="b2"></div>
+    </div>
+  </div>
+  <div class="count-group">
+    <span class="count-label">S</span>
+    <div class="count-dots" id="strike-dots">
+      <div class="dot strike" id="s0"></div>
+      <div class="dot strike" id="s1"></div>
+    </div>
+  </div>
+  <span id="pitch-num-label">Pitch #1</span>
+  <span id="at-bat-status"></span>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Left: Pitch input panel -->
+  <div class="panel">
+    <div class="panel-title">Pitch Input</div>
+
+    <!-- Pitch type -->
+    <div id="pitch-types">
+      <button class="pt-btn active" data-type="FF">FF</button>
+      <button class="pt-btn" data-type="SI">SI</button>
+      <button class="pt-btn" data-type="FC">FC</button>
+      <button class="pt-btn" data-type="SL">SL</button>
+      <button class="pt-btn" data-type="SV">SV</button>
+      <button class="pt-btn" data-type="CU">CU</button>
+      <button class="pt-btn" data-type="KC">KC</button>
+      <button class="pt-btn" data-type="CH">CH</button>
+      <button class="pt-btn" data-type="FS">FS</button>
+      <button class="pt-btn" data-type="KN">KN</button>
+    </div>
+
+    <!-- Velocity -->
+    <div class="slider-field">
+      <div class="slider-header">
+        <label>Velocity (mph)</label>
+        <input type="number" id="num-velo" value="93.0" min="60" max="106" step="0.1">
+      </div>
+      <input type="range" id="sld-velo" min="60" max="106" step="0.1" value="93">
+    </div>
+
+    <!-- Spin rate -->
+    <div class="slider-field">
+      <div class="slider-header">
+        <label>Spin Rate (rpm)</label>
+        <input type="number" id="num-spin" value="2200" min="800" max="3600" step="10">
+      </div>
+      <input type="range" id="sld-spin" min="800" max="3600" step="10" value="2200">
+    </div>
+
+    <!-- H-Break -->
+    <div class="slider-field">
+      <div class="slider-header">
+        <label>H-Break pfx_x (ft, arm-side +)</label>
+        <input type="number" id="num-pfxx" value="0.00" min="-2.5" max="2.5" step="0.01">
+      </div>
+      <input type="range" id="sld-pfxx" min="-2.5" max="2.5" step="0.01" value="0">
+    </div>
+
+    <!-- V-Break -->
+    <div class="slider-field">
+      <div class="slider-header">
+        <label>V-Break pfx_z (ft, rise +)</label>
+        <input type="number" id="num-pfxz" value="1.00" min="-2" max="3" step="0.01">
+      </div>
+      <input type="range" id="sld-pfxz" min="-2" max="3" step="0.01" value="1">
+    </div>
+
+    <!-- Release point -->
+    <div class="compact-row">
+      <div class="compact-field">
+        <label>Release X (ft)</label>
+        <input type="number" id="inp-relx" value="-1.5" min="-4" max="4" step="0.1">
+      </div>
+      <div class="compact-field">
+        <label>Release Z (ft)</label>
+        <input type="number" id="inp-relz" value="6.0" min="3" max="8" step="0.1">
+      </div>
+      <div class="compact-field">
+        <label>Extension (ft)</label>
+        <input type="number" id="inp-ext" value="6.2" min="3" max="8" step="0.1">
+      </div>
+    </div>
+
+    <!-- Strike zone -->
+    <div id="zone-label">Location — click to place pitch</div>
+    <div id="zone-wrap">
+      <svg id="zone-svg" width="200" height="200" viewBox="0 0 200 200">
+        <!-- Background -->
+        <rect width="200" height="200" fill="#161b22" rx="4"/>
+        <!-- Outer boundary guidelines -->
+        <rect x="10" y="10" width="180" height="180" fill="none" stroke="#21262d" stroke-width="1"/>
+        <!-- Strike zone -->
+        <rect id="sz-rect" fill="none" stroke="#388bfd" stroke-width="1.5" stroke-dasharray="4,2"/>
+        <!-- Zone thirds (visual guides) -->
+        <line id="sz-h1" stroke="#1e2a3a" stroke-width="1"/>
+        <line id="sz-h2" stroke="#1e2a3a" stroke-width="1"/>
+        <line id="sz-v1" stroke="#1e2a3a" stroke-width="1"/>
+        <line id="sz-v2" stroke="#1e2a3a" stroke-width="1"/>
+        <!-- Home plate indicator -->
+        <line x1="85" y1="192" x2="115" y2="192" stroke="#30363d" stroke-width="2"/>
+        <text x="100" y="199" text-anchor="middle" fill="#30363d" font-size="8">HOME</text>
+        <!-- Pitch dot -->
+        <circle id="pitch-dot" cx="100" cy="100" r="6" fill="#f85149" stroke="#fff" stroke-width="1.5" opacity="0"/>
+        <circle id="pitch-dot-ring" cx="100" cy="100" r="10" fill="none" stroke="#f85149" stroke-width="1" opacity="0"/>
+      </svg>
+
+      <div class="location-inputs">
+        <div class="compact-field">
+          <label>Plate X (ft)</label>
+          <input type="number" id="inp-platex" value="0.00" min="-2" max="2" step="0.01">
+        </div>
+        <div class="compact-field">
+          <label>Plate Z (ft)</label>
+          <input type="number" id="inp-platez" value="2.50" min="0.5" max="5" step="0.01">
+        </div>
+      </div>
+    </div>
+
+    <button id="throw-btn">⚾ THROW PITCH</button>
+  </div>
+
+  <!-- Right: Result panel -->
+  <div class="panel">
+    <div class="panel-title">Result</div>
+
+    <!-- Probability display -->
+    <div id="result-display" class="placeholder">
+      <span>Throw a pitch to see hit probability</span>
+    </div>
+
+    <!-- Outcome buttons -->
+    <div id="outcome-section">
+      <h3>What happened?</h3>
+      <div class="outcome-grid">
+        <span class="outcome-group-label">Count</span>
+        <button class="oc-btn ball"   onclick="recordOutcome('ball')">Ball</button>
+        <button class="oc-btn strike" onclick="recordOutcome('called_strike')">Called K</button>
+        <button class="oc-btn strike" onclick="recordOutcome('swinging_strike')">Swinging K</button>
+        <button class="oc-btn foul"   onclick="recordOutcome('foul')">Foul</button>
+
+        <span class="outcome-group-label">Hits</span>
+        <button class="oc-btn hit"    onclick="recordOutcome('single')">Single</button>
+        <button class="oc-btn hit"    onclick="recordOutcome('double')">Double</button>
+        <button class="oc-btn hit"    onclick="recordOutcome('triple')">Triple</button>
+        <button class="oc-btn hit"    onclick="recordOutcome('home_run')">Home Run</button>
+
+        <span class="outcome-group-label">End At-Bat</span>
+        <button class="oc-btn out"    onclick="recordOutcome('field_out')">Field Out</button>
+        <button class="oc-btn out"    onclick="recordOutcome('strikeout')">Strikeout</button>
+        <button class="oc-btn ball"   onclick="recordOutcome('walk')">Walk</button>
+        <button class="oc-btn out"    onclick="recordOutcome('hit_by_pitch')">HBP</button>
+      </div>
+    </div>
+
+    <!-- Pitch history -->
+    <div id="history-section">
+      <h3>Pitch Log</h3>
+      <table id="history-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Type</th>
+            <th>Velo</th>
+            <th>Count</th>
+            <th>Hit Prob</th>
+            <th>Outcome</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="error-toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  hitter: '',
+  p_throws: 'R',
+  hitter_stand: 'R',
+  inning: 1,
+  score_diff: 0,
+  on_1b: false, on_2b: false, on_3b: false,
+
+  // at-bat progress
+  balls: 0, strikes: 0, pitch_number: 0,
+  prev_pitch_type: 'FIRST_PITCH',
+  prev_pitch_speed: -1,
+  prev_pitch_result: 'FIRST_PITCH',
+
+  lastPitch: null,
+  awaitingOutcome: false,
+  atBatOver: false,
+  history: [],
+}
+
+// ── Zone SVG math ─────────────────────────────────────────────────────────────
+// SVG: 200×200, margins 10px, inner 180×180
+// plate_x: -2.0 to 2.0, plate_z: 0.5 to 4.5
+const SVG_M = 10, SVG_INNER = 180
+const PX_MIN = -2.0, PX_MAX = 2.0, PX_RANGE = 4.0
+const PZ_MIN = 0.5,  PZ_MAX = 4.5, PZ_RANGE = 4.0
+
+function pitchToSvg(px, pz) {
+  return {
+    x: SVG_M + ((px - PX_MIN) / PX_RANGE) * SVG_INNER,
+    y: SVG_M + ((PZ_MAX - pz) / PZ_RANGE) * SVG_INNER,
+  }
+}
+function svgToPitch(sx, sy) {
+  return {
+    px: +(PX_MIN + ((sx - SVG_M) / SVG_INNER) * PX_RANGE).toFixed(2),
+    pz: +(PZ_MAX - ((sy - SVG_M) / SVG_INNER) * PZ_RANGE).toFixed(2),
+  }
+}
+
+// Draw static strike zone elements
+function initZone() {
+  const tl = pitchToSvg(-0.85, 3.5)
+  const br = pitchToSvg(0.85, 1.5)
+  const w = br.x - tl.x, h = br.y - tl.y
+
+  const sz = document.getElementById('sz-rect')
+  sz.setAttribute('x', tl.x)
+  sz.setAttribute('y', tl.y)
+  sz.setAttribute('width', w)
+  sz.setAttribute('height', h)
+
+  // Thirds grid lines
+  const t3w = w / 3, t3h = h / 3
+  document.getElementById('sz-v1').setAttribute('x1', tl.x + t3w)
+  document.getElementById('sz-v1').setAttribute('y1', tl.y)
+  document.getElementById('sz-v1').setAttribute('x2', tl.x + t3w)
+  document.getElementById('sz-v1').setAttribute('y2', br.y)
+  document.getElementById('sz-v2').setAttribute('x1', tl.x + 2*t3w)
+  document.getElementById('sz-v2').setAttribute('y1', tl.y)
+  document.getElementById('sz-v2').setAttribute('x2', tl.x + 2*t3w)
+  document.getElementById('sz-v2').setAttribute('y2', br.y)
+  document.getElementById('sz-h1').setAttribute('x1', tl.x)
+  document.getElementById('sz-h1').setAttribute('y1', tl.y + t3h)
+  document.getElementById('sz-h1').setAttribute('x2', br.x)
+  document.getElementById('sz-h1').setAttribute('y2', tl.y + t3h)
+  document.getElementById('sz-h2').setAttribute('x1', tl.x)
+  document.getElementById('sz-h2').setAttribute('y1', tl.y + 2*t3h)
+  document.getElementById('sz-h2').setAttribute('x2', br.x)
+  document.getElementById('sz-h2').setAttribute('y2', tl.y + 2*t3h)
+}
+
+function updateZoneDot(px, pz) {
+  const {x, y} = pitchToSvg(px, pz)
+  const dot  = document.getElementById('pitch-dot')
+  const ring = document.getElementById('pitch-dot-ring')
+  dot.setAttribute('cx', x);  dot.setAttribute('cy', y)
+  ring.setAttribute('cx', x); ring.setAttribute('cy', y)
+  dot.setAttribute('opacity', '1')
+  ring.setAttribute('opacity', '0.5')
+}
+
+// ── Count display ─────────────────────────────────────────────────────────────
+function updateCount() {
+  for (let i = 0; i < 3; i++) {
+    document.getElementById('b' + i).classList.toggle('on', i < state.balls)
+  }
+  for (let i = 0; i < 2; i++) {
+    document.getElementById('s' + i).classList.toggle('on', i < state.strikes)
+  }
+  document.getElementById('pitch-num-label').textContent = `Pitch #${state.pitch_number + 1}`
+
+  const status = document.getElementById('at-bat-status')
+  if (state.atBatOver) {
+    status.textContent = 'At-bat over'
+    status.className = 'over'
+    document.getElementById('throw-btn').disabled = true
+  } else {
+    status.textContent = ''
+    status.className = ''
+    document.getElementById('throw-btn').disabled = false
+  }
+}
+
+// ── Toggle buttons ────────────────────────────────────────────────────────────
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const group = btn.dataset.group
+    document.querySelectorAll(`.toggle-btn[data-group="${group}"]`).forEach(b => b.classList.remove('active'))
+    btn.classList.add('active')
+    state[group] = btn.dataset.val
+  })
+})
+
+document.querySelectorAll('.runner-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const base = btn.dataset.base
+    state[base] = !state[base]
+    btn.classList.toggle('active', state[base])
+  })
+})
+
+// ── Pitch type ────────────────────────────────────────────────────────────────
+document.querySelectorAll('.pt-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.pt-btn').forEach(b => b.classList.remove('active'))
+    btn.classList.add('active')
+  })
+})
+function selectedPitchType() {
+  return document.querySelector('.pt-btn.active')?.dataset.type || 'FF'
+}
+
+// ── Slider ↔ number input sync ────────────────────────────────────────────────
+function linkSlider(sldId, numId) {
+  const sld = document.getElementById(sldId)
+  const num = document.getElementById(numId)
+  sld.addEventListener('input', () => { num.value = sld.value })
+  num.addEventListener('input', () => {
+    sld.value = num.value
+    if (sldId === 'sld-pfxx' || sldId === 'sld-pfxz') return
+  })
+}
+linkSlider('sld-velo', 'num-velo')
+linkSlider('sld-spin', 'num-spin')
+linkSlider('sld-pfxx', 'num-pfxx')
+linkSlider('sld-pfxz', 'num-pfxz')
+
+// ── Zone SVG interaction ──────────────────────────────────────────────────────
+document.getElementById('zone-svg').addEventListener('click', e => {
+  const rect = e.currentTarget.getBoundingClientRect()
+  const scaleX = 200 / rect.width
+  const scaleY = 200 / rect.height
+  const sx = (e.clientX - rect.left) * scaleX
+  const sy = (e.clientY - rect.top)  * scaleY
+  const {px, pz} = svgToPitch(sx, sy)
+  document.getElementById('inp-platex').value = px
+  document.getElementById('inp-platez').value = pz
+  updateZoneDot(px, pz)
+})
+
+// Sync text inputs → dot
+document.getElementById('inp-platex').addEventListener('input', syncDot)
+document.getElementById('inp-platez').addEventListener('input', syncDot)
+function syncDot() {
+  const px = parseFloat(document.getElementById('inp-platex').value) || 0
+  const pz = parseFloat(document.getElementById('inp-platez').value) || 2.5
+  updateZoneDot(px, pz)
+}
+
+// ── Hitter autocomplete ───────────────────────────────────────────────────────
+let hitterDebounce = null
+document.getElementById('hitter-input').addEventListener('input', e => {
+  clearTimeout(hitterDebounce)
+  const q = e.target.value.trim()
+  if (q.length < 2) { hideSuggestions(); return }
+  hitterDebounce = setTimeout(() => fetchHitters(q), 200)
+})
+document.getElementById('hitter-input').addEventListener('blur', () => {
+  setTimeout(hideSuggestions, 150)
+})
+
+async function fetchHitters(q) {
+  try {
+    const r = await fetch(`/api/hitters?q=${encodeURIComponent(q)}`)
+    const names = await r.json()
+    showSuggestions(names)
+  } catch { hideSuggestions() }
+}
+function showSuggestions(names) {
+  const box = document.getElementById('hitter-suggestions')
+  box.innerHTML = ''
+  if (!names.length) { hideSuggestions(); return }
+  names.forEach(name => {
+    const div = document.createElement('div')
+    div.textContent = name
+    div.addEventListener('mousedown', () => {
+      document.getElementById('hitter-input').value = name
+      state.hitter = name
+      hideSuggestions()
+    })
+    box.appendChild(div)
+  })
+  box.style.display = 'block'
+}
+function hideSuggestions() {
+  document.getElementById('hitter-suggestions').style.display = 'none'
+}
+
+// ── New at-bat ────────────────────────────────────────────────────────────────
+document.getElementById('new-ab-btn').addEventListener('click', newAtBat)
+function newAtBat() {
+  state.balls = 0; state.strikes = 0; state.pitch_number = 0
+  state.prev_pitch_type = 'FIRST_PITCH'
+  state.prev_pitch_speed = -1
+  state.prev_pitch_result = 'FIRST_PITCH'
+  state.lastPitch = null
+  state.awaitingOutcome = false
+  state.atBatOver = false
+  state.history = []
+  state.hitter = document.getElementById('hitter-input').value.trim()
+  state.inning = parseInt(document.getElementById('inp-inning').value) || 1
+  state.score_diff = parseInt(document.getElementById('inp-score-diff').value) || 0
+
+  updateCount()
+  document.getElementById('history-body').innerHTML = ''
+  showPlaceholder()
+  document.getElementById('outcome-section').style.display = 'none'
+  document.getElementById('throw-btn').disabled = false
+}
+
+// ── Submit pitch ──────────────────────────────────────────────────────────────
+document.getElementById('throw-btn').addEventListener('click', submitPitch)
+async function submitPitch() {
+  if (state.atBatOver) return
+  if (state.awaitingOutcome) { showError('Record the outcome before throwing another pitch.'); return }
+
+  const hitter = document.getElementById('hitter-input').value.trim()
+  if (!hitter) { showError('Enter a hitter name first.'); return }
+  state.hitter = hitter
+
+  const pitch = {
+    pitch_type:          selectedPitchType(),
+    release_speed:       parseFloat(document.getElementById('num-velo').value),
+    release_spin_rate:   parseFloat(document.getElementById('num-spin').value),
+    pfx_x:               parseFloat(document.getElementById('num-pfxx').value),
+    pfx_z:               parseFloat(document.getElementById('num-pfxz').value),
+    release_pos_x:       parseFloat(document.getElementById('inp-relx').value),
+    release_pos_z:       parseFloat(document.getElementById('inp-relz').value),
+    release_extension:   parseFloat(document.getElementById('inp-ext').value),
+    plate_x:             parseFloat(document.getElementById('inp-platex').value),
+    plate_z:             parseFloat(document.getElementById('inp-platez').value),
+    balls:               state.balls,
+    strikes:             state.strikes,
+    pitch_number:        state.pitch_number + 1,
+    prev_pitch_type:     state.prev_pitch_type,
+    prev_pitch_speed:    state.prev_pitch_speed,
+    prev_pitch_result:   state.prev_pitch_result,
+    on_1b:               state.on_1b ? 1 : null,
+    on_2b:               state.on_2b ? 1 : null,
+    on_3b:               state.on_3b ? 1 : null,
+    inning:              state.inning,
+    score_diff:          state.score_diff,
+    p_throws:            state.p_throws,
+    stand:               state.hitter_stand,
+  }
+
+  document.getElementById('throw-btn').disabled = true
+  document.getElementById('throw-btn').textContent = 'Computing...'
+
+  try {
+    const resp = await fetch('/api/predict', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pitch, hitter: state.hitter}),
+    })
+    const data = await resp.json()
+
+    document.getElementById('throw-btn').textContent = '⚾ THROW PITCH'
+    document.getElementById('throw-btn').disabled = false
+
+    if (!data.ok) { showError(data.error); return }
+
+    state.pitch_number++
+    state.lastPitch = pitch
+    updateZoneDot(pitch.plate_x, pitch.plate_z)
+    showResult(data, pitch)
+    addHistoryRow(data, pitch, null)
+
+    state.awaitingOutcome = true
+    document.getElementById('outcome-section').style.display = 'block'
+    document.getElementById('throw-btn').disabled = true
+
+  } catch (e) {
+    document.getElementById('throw-btn').textContent = '⚾ THROW PITCH'
+    document.getElementById('throw-btn').disabled = false
+    showError('Connection error: ' + e.message)
+  }
+}
+
+// ── Show result ───────────────────────────────────────────────────────────────
+function probColor(p) {
+  if (p < 0.06) return '#3fb950'
+  if (p < 0.10) return '#7ee787'
+  if (p < 0.15) return '#d29922'
+  if (p < 0.22) return '#db6d28'
+  return '#f85149'
+}
+
+function showResult(data, pitch) {
+  const p = data.hit_probability
+  const color = probColor(p)
+  const pct = (p * 100).toFixed(1)
+  const barW = Math.min(p * 3 * 100, 100).toFixed(1)  // scale so 33% = full bar
+
+  const warnings = []
+  if (data.used_fallback) warnings.push('⚠ Hitter not in database — league-average profile used')
+  else if (data.is_thin_sample) warnings.push('⚠ Thin sample — profile blended with league averages')
+
+  document.getElementById('result-display').className = ''
+  document.getElementById('result-display').innerHTML = `
+    <div id="prob-value" style="color:${color}">${pct}%</div>
+    <div id="prob-label">Hit Probability</div>
+    <div id="prob-bar-wrap">
+      <div id="prob-bar" style="width:${barW}%;background:${color}"></div>
+    </div>
+    <div id="result-meta">${data.hitter} · ${pitch.pitch_type} · ${state.balls}-${state.strikes} count</div>
+    ${warnings.map(w => `<div id="result-warning">${w}</div>`).join('')}
+  `
+}
+
+function showPlaceholder() {
+  document.getElementById('result-display').className = 'placeholder'
+  document.getElementById('result-display').innerHTML = '<span>Throw a pitch to see hit probability</span>'
+}
+
+// ── Record outcome ────────────────────────────────────────────────────────────
+const BALL_OC    = ['ball', 'blocked_ball']
+const STRIKE_OC  = ['called_strike', 'swinging_strike', 'swinging_strike_blocked']
+const FOUL_OC    = ['foul', 'foul_bunt']
+const ENDING_OC  = ['single','double','triple','home_run','field_out',
+                    'grounded_into_double_play','double_play','strikeout',
+                    'walk','hit_by_pitch','sac_fly','sac_bunt',
+                    'force_out','fielders_choice','fielders_choice_out']
+
+function recordOutcome(outcome) {
+  if (!state.awaitingOutcome) return
+
+  // Update last history row
+  const rows = document.getElementById('history-body').querySelectorAll('tr')
+  if (rows.length) {
+    const lastOcCell = rows[rows.length - 1].querySelector('.oc-cell')
+    if (lastOcCell) lastOcCell.innerHTML = ocTag(outcome)
+  }
+
+  // Update prev pitch info
+  state.prev_pitch_type   = state.lastPitch.pitch_type
+  state.prev_pitch_speed  = state.lastPitch.release_speed
+  state.prev_pitch_result = outcome
+
+  // Advance count
+  if (ENDING_OC.includes(outcome)) {
+    state.atBatOver = true
+  } else if (BALL_OC.includes(outcome)) {
+    state.balls++
+    if (state.balls >= 4) state.atBatOver = true  // walk
+  } else if (STRIKE_OC.includes(outcome)) {
+    state.strikes++
+    if (state.strikes >= 3) state.atBatOver = true  // strikeout
+  } else if (FOUL_OC.includes(outcome)) {
+    if (state.strikes < 2) state.strikes++
+  }
+
+  state.awaitingOutcome = false
+  document.getElementById('outcome-section').style.display = 'none'
+
+  updateCount()
+
+  if (state.atBatOver) {
+    document.getElementById('throw-btn').disabled = true
+  }
+}
+
+function ocTag(outcome) {
+  const colors = {
+    ball: 'var(--green)', walk: 'var(--green)', hit_by_pitch: 'var(--green)',
+    called_strike: 'var(--red)', swinging_strike: 'var(--red)', strikeout: 'var(--red)',
+    swinging_strike_blocked: 'var(--red)',
+    foul: 'var(--yellow)', foul_bunt: 'var(--yellow)',
+    single: 'var(--blue)', double: 'var(--blue)', triple: 'var(--blue)', home_run: 'var(--blue)',
+  }
+  const c = colors[outcome] || 'var(--text-muted)'
+  return `<span class="oc-tag" style="border-color:${c};color:${c}">${outcome.replace('_', ' ')}</span>`
+}
+
+// ── History table ─────────────────────────────────────────────────────────────
+function addHistoryRow(data, pitch, outcome) {
+  const tbody = document.getElementById('history-body')
+  const p = data.hit_probability
+  const color = probColor(p)
+  const tr = document.createElement('tr')
+  tr.innerHTML = `
+    <td>${state.pitch_number}</td>
+    <td><strong>${pitch.pitch_type}</strong></td>
+    <td>${pitch.release_speed.toFixed(1)}</td>
+    <td>${state.balls}-${state.strikes}</td>
+    <td class="prob-cell" style="color:${color}">${(p*100).toFixed(1)}%</td>
+    <td class="oc-cell">${outcome ? ocTag(outcome) : '<span style="color:var(--text-muted)">—</span>'}</td>
+  `
+  tbody.appendChild(tr)
+}
+
+// ── Error toast ───────────────────────────────────────────────────────────────
+let errorTimer = null
+function showError(msg) {
+  const toast = document.getElementById('error-toast')
+  toast.textContent = msg
+  toast.style.display = 'block'
+  clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => { toast.style.display = 'none' }, 4000)
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+initZone()
+updateCount()
+updateZoneDot(0.0, 2.5)
+</script>
+</body>
+</html>

@@ -42,6 +42,68 @@ PROFILE_RECENCY_WEIGHTS = {
 }
 PROFILE_RECENCY_DEFAULT = 0.5  # 2021 and earlier
 
+# ---------------------------------------------------------------------------
+# Zone and pitch-family definitions
+# ---------------------------------------------------------------------------
+
+STRIKE_ZONES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+BALL_ZONES   = [11, 12, 13, 14]
+ALL_ZONES    = STRIKE_ZONES + BALL_ZONES
+
+# Zone layout (from catcher's perspective):
+#   11 (high-inside) | 12 (high-outside)
+#   ┌───┬───┬───┐
+#   │ 1 │ 2 │ 3 │  ← top row
+#   ├───┼───┼───┤
+#   │ 4 │ 5 │ 6 │  ← middle row
+#   ├───┼───┼───┤
+#   │ 7 │ 8 │ 9 │  ← bottom row
+#   └───┴───┴───┘
+#   13 (low-inside)  | 14 (low-outside)
+
+PITCH_FAMILIES = {
+    "fastball": ["FF", "SI", "FC"],
+    "breaking": ["SL", "CU", "KC", "SV", "CS"],
+    "offspeed": ["CH", "FS", "FO"],
+    "other":    ["KN", "EP", "SC"],
+}
+PITCH_FAMILY_LIST = ["fastball", "breaking", "offspeed", "other"]
+
+MIN_ZONE_PITCHES   = 20   # weighted pitches per zone before fallback
+MIN_FAMILY_PITCHES = 30   # weighted pitches per pitch family before fallback
+
+
+def _get_pitch_family(pitch_type: str) -> str:
+    for family, types in PITCH_FAMILIES.items():
+        if pitch_type in types:
+            return family
+    return "other"
+
+
+def assign_pitch_family(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a pitch_family column by mapping pitch_type through PITCH_FAMILIES."""
+    df = df.copy()
+    df["pitch_family"] = df["pitch_type"].map(_get_pitch_family).fillna("other")
+    return df
+
+
+# Cache populated once by merge_profiles_into_df before iterating batters
+_NAME_CACHE: dict = {}
+
+
+def _build_name_cache(player_ids: list) -> None:
+    """Bulk-fetch batter names from pybaseball and populate _NAME_CACHE."""
+    global _NAME_CACHE
+    try:
+        import pybaseball
+        result = pybaseball.playerid_reverse_lookup(player_ids, key_type="mlbam")
+        for _, row in result.iterrows():
+            pid = int(row["key_mlbam"])
+            _NAME_CACHE[pid] = f"{str(row['name_last']).title()}, {str(row['name_first']).title()}"
+        print(f"Resolved names for {len(_NAME_CACHE):,} players.")
+    except Exception as e:
+        print(f"Name lookup failed ({e}) — profiles will use player IDs as names.")
+
 
 def _row_weights(df: pd.DataFrame) -> np.ndarray:
     """Return per-row recency weights based on game_date year."""
@@ -73,8 +135,12 @@ class HitterProfile:
     contact_rate: float
     hard_hit_rate: float
     whiff_rate: float
-    swing_rate_by_count: dict = field(default_factory=dict)   # (balls, strikes) -> float
-    contact_rate_by_pitch_type: dict = field(default_factory=dict)  # pitch_type_str -> float
+    swing_rate_by_count: dict = field(default_factory=dict)        # "balls-strikes" -> float
+    contact_rate_by_pitch_type: dict = field(default_factory=dict) # pitch_type_str -> float
+    zone_swing_rates: dict = field(default_factory=dict)           # zone_int -> float
+    zone_whiff_rates: dict = field(default_factory=dict)           # zone_int -> float
+    family_swing_rates: dict = field(default_factory=dict)         # family_str -> float
+    family_whiff_rates: dict = field(default_factory=dict)         # family_str -> float
     sample_size: int = 0
     is_thin_sample: bool = False
 
@@ -182,7 +248,89 @@ def compute_swing_rate_by_count(df: pd.DataFrame, w: np.ndarray) -> dict:
     return result
 
 
+def compute_zone_swing_rates(df: pd.DataFrame, w: np.ndarray, fallback: float) -> dict:
+    """
+    Weighted swing rate per Statcast zone (1-9 strike, 11-14 ball).
+    Rows with NaN zone are excluded from zone calculations only.
+    Falls back to hitter's overall swing rate for zones below MIN_ZONE_PITCHES.
+    """
+    valid = df[df["zone"].notna()].copy()
+    valid_w = w[df.index.get_indexer(valid.index)]
+    result = {}
+    for z in ALL_ZONES:
+        mask = valid["zone"] == z
+        grp = valid[mask]
+        grp_w = valid_w[valid.index.get_indexer(grp.index)]
+        if grp_w.sum() >= MIN_ZONE_PITCHES:
+            result[z] = compute_swing_rate(grp, grp_w)
+        else:
+            result[z] = fallback
+    return result
+
+
+def compute_zone_whiff_rates(df: pd.DataFrame, w: np.ndarray, fallback: float) -> dict:
+    """
+    Weighted whiff rate per Statcast zone.
+    Falls back to hitter's overall whiff rate for thin zones.
+    """
+    valid = df[df["zone"].notna()].copy()
+    valid_w = w[df.index.get_indexer(valid.index)]
+    result = {}
+    for z in ALL_ZONES:
+        mask = valid["zone"] == z
+        grp = valid[mask]
+        grp_w = valid_w[valid.index.get_indexer(grp.index)]
+        if grp_w.sum() >= MIN_ZONE_PITCHES:
+            result[z] = compute_whiff_rate(grp, grp_w)
+        else:
+            result[z] = fallback
+    return result
+
+
+def compute_family_swing_rates(df: pd.DataFrame, w: np.ndarray, fallback: float) -> dict:
+    """
+    Weighted swing rate per pitch family (fastball, breaking, offspeed, other).
+    Falls back to overall swing rate for families below MIN_FAMILY_PITCHES.
+    """
+    df = assign_pitch_family(df)
+    result = {}
+    for fam in PITCH_FAMILY_LIST:
+        mask = df["pitch_family"] == fam
+        grp = df[mask]
+        grp_w = w[df.index.get_indexer(grp.index)]
+        if grp_w.sum() >= MIN_FAMILY_PITCHES:
+            result[fam] = compute_swing_rate(grp, grp_w)
+        else:
+            result[fam] = fallback
+    return result
+
+
+def compute_family_whiff_rates(df: pd.DataFrame, w: np.ndarray, fallback: float) -> dict:
+    """
+    Weighted whiff rate per pitch family.
+    Falls back to overall whiff rate for thin families.
+    """
+    df = assign_pitch_family(df)
+    result = {}
+    for fam in PITCH_FAMILY_LIST:
+        mask = df["pitch_family"] == fam
+        grp = df[mask]
+        grp_w = w[df.index.get_indexer(grp.index)]
+        if grp_w.sum() >= MIN_FAMILY_PITCHES:
+            result[fam] = compute_whiff_rate(grp, grp_w)
+        else:
+            result[fam] = fallback
+    return result
+
+
 def compute_contact_rate_by_pitch_type(df: pd.DataFrame, w: np.ndarray) -> dict:
+    # Pre-2023 Statcast labeled sweepers as "SV"; 2023+ uses "ST".
+    # Merge pre-2023 SV rows into the ST bucket so the sweeper feature
+    # has full historical coverage. Post-2023 SV is slurve only.
+    df = df.copy()
+    pre_2023_sv = (df["game_date"].dt.year < 2023) & (df["pitch_type"] == "SV")
+    df.loc[pre_2023_sv, "pitch_type"] = "ST"
+
     result = {}
     for pitch_type, idx in df.groupby("pitch_type").groups.items():
         grp = df.loc[idx]
@@ -202,11 +350,21 @@ def _blend(computed: float, league_avg: float, weighted_pa: float) -> float:
 
 
 def _blend_profile(profile: HitterProfile, weighted_pa: float) -> HitterProfile:
-    profile.swing_rate = _blend(profile.swing_rate, LEAGUE_AVG["swing_rate"], weighted_pa)
-    profile.chase_rate = _blend(profile.chase_rate, LEAGUE_AVG["chase_rate"], weighted_pa)
-    profile.contact_rate = _blend(profile.contact_rate, LEAGUE_AVG["contact_rate"], weighted_pa)
+    profile.swing_rate    = _blend(profile.swing_rate,    LEAGUE_AVG["swing_rate"],    weighted_pa)
+    profile.chase_rate    = _blend(profile.chase_rate,    LEAGUE_AVG["chase_rate"],    weighted_pa)
+    profile.contact_rate  = _blend(profile.contact_rate,  LEAGUE_AVG["contact_rate"],  weighted_pa)
     profile.hard_hit_rate = _blend(profile.hard_hit_rate, LEAGUE_AVG["hard_hit_rate"], weighted_pa)
-    profile.whiff_rate = _blend(profile.whiff_rate, LEAGUE_AVG["whiff_rate"], weighted_pa)
+    profile.whiff_rate    = _blend(profile.whiff_rate,    LEAGUE_AVG["whiff_rate"],    weighted_pa)
+    for z in ALL_ZONES:
+        if z in profile.zone_swing_rates:
+            profile.zone_swing_rates[z] = _blend(profile.zone_swing_rates[z], LEAGUE_AVG["swing_rate"], weighted_pa)
+        if z in profile.zone_whiff_rates:
+            profile.zone_whiff_rates[z] = _blend(profile.zone_whiff_rates[z], LEAGUE_AVG["whiff_rate"], weighted_pa)
+    for fam in PITCH_FAMILY_LIST:
+        if fam in profile.family_swing_rates:
+            profile.family_swing_rates[fam] = _blend(profile.family_swing_rates[fam], LEAGUE_AVG["swing_rate"], weighted_pa)
+        if fam in profile.family_whiff_rates:
+            profile.family_whiff_rates[fam] = _blend(profile.family_whiff_rates[fam], LEAGUE_AVG["whiff_rate"], weighted_pa)
     return profile
 
 
@@ -216,25 +374,48 @@ def _blend_profile(profile: HitterProfile, weighted_pa: float) -> HitterProfile:
 
 def get_player_id(name: str, df: pd.DataFrame) -> int:
     """
-    Look up MLBAM batter ID by name.
-    Tries exact match first, then case-insensitive substring.
-    Raises ValueError listing closest matches if not found.
+    Look up MLBAM batter ID by name using pybaseball's player lookup.
+    Falls back to searching saved profile JSON names if lookup fails.
+    Raises ValueError with suggestions if not found.
     """
-    if "player_name" not in df.columns:
-        raise KeyError("DataFrame missing 'player_name' column.")
+    import pybaseball
 
-    exact = df[df["player_name"] == name]["batter"].unique()
-    if len(exact) == 1:
-        return int(exact[0])
-    if len(exact) > 1:
-        return int(exact[0])  # take first (all rows share the same player_id)
+    # Parse "last, first" or "first last" formats
+    if "," in name:
+        last, first = [p.strip() for p in name.split(",", 1)]
+    else:
+        parts = name.strip().split()
+        first, last = parts[0], parts[-1]
 
-    # Case-insensitive substring match
+    try:
+        result = pybaseball.playerid_lookup(last, first, fuzzy=True)
+        if len(result) > 0:
+            # Filter to players who appear as batters in our dataset
+            for _, row in result.iterrows():
+                pid = int(row["key_mlbam"])
+                if pid in df["batter"].values:
+                    return pid
+            # If none matched our dataset, return the top lookup result anyway
+            return int(result.iloc[0]["key_mlbam"])
+    except Exception:
+        pass
+
+    # Fallback: search profile JSON names
+    profile_dir = PROFILE_DIR
     lower = name.lower()
-    candidates = df[df["player_name"].str.lower().str.contains(lower, na=False)]["player_name"].unique()
-    if len(candidates) == 0:
-        raise ValueError(f"Player '{name}' not found. No similar names in dataset.")
-    raise ValueError(f"Player '{name}' not found. Did you mean one of: {list(candidates[:5])}")
+    matches = []
+    for path in profile_dir.glob("*.json"):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if lower in data.get("player_name", "").lower():
+                matches.append(data["player_name"])
+        except Exception:
+            continue
+
+    if matches:
+        raise ValueError(f"Player '{name}' not in dataset. Similar names in profiles: {matches[:5]}")
+    raise ValueError(f"Player '{name}' not found.")
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +425,7 @@ def get_player_id(name: str, df: pd.DataFrame) -> int:
 def build_profile(
     player_id: int,
     df: pd.DataFrame,
-    date_cutoff: str = "2023-01-01",
+    date_cutoff: str = "2025-01-01",
 ) -> HitterProfile:
     """
     Build a HitterProfile from the player's pitches before date_cutoff.
@@ -253,10 +434,9 @@ def build_profile(
     cutoff = pd.Timestamp(date_cutoff)
     sub = df[(df["batter"] == player_id) & (df["game_date"] < cutoff)].copy()
 
-    # Resolve player name
-    name = "Unknown"
-    if "player_name" in sub.columns and len(sub) > 0:
-        name = sub["player_name"].iloc[0]
+    # Name is resolved externally via bulk lookup and passed in via _NAME_CACHE.
+    # NOTE: player_name in Statcast rows is the PITCHER's name, not the batter's.
+    name = _NAME_CACHE.get(player_id, f"Player {player_id}")
 
     stand = sub["stand"].mode().iloc[0] if len(sub) > 0 else "R"
     n = len(sub)
@@ -265,17 +445,27 @@ def build_profile(
     weighted_pa = _weighted_pa_count(sub) if n > 0 else 0.0
     is_thin = weighted_pa < MIN_WEIGHTED_PA
 
+    swing_rate    = compute_swing_rate(sub, w)    if n > 0 else LEAGUE_AVG["swing_rate"]
+    chase_rate    = compute_chase_rate(sub, w)    if n > 0 else LEAGUE_AVG["chase_rate"]
+    contact_rate  = compute_contact_rate(sub, w)  if n > 0 else LEAGUE_AVG["contact_rate"]
+    hard_hit_rate = compute_hard_hit_rate(sub, w) if n > 0 else LEAGUE_AVG["hard_hit_rate"]
+    whiff_rate    = compute_whiff_rate(sub, w)    if n > 0 else LEAGUE_AVG["whiff_rate"]
+
     profile = HitterProfile(
         player_id=player_id,
         player_name=name,
         stand=stand,
-        swing_rate=compute_swing_rate(sub, w) if n > 0 else LEAGUE_AVG["swing_rate"],
-        chase_rate=compute_chase_rate(sub, w) if n > 0 else LEAGUE_AVG["chase_rate"],
-        contact_rate=compute_contact_rate(sub, w) if n > 0 else LEAGUE_AVG["contact_rate"],
-        hard_hit_rate=compute_hard_hit_rate(sub, w) if n > 0 else LEAGUE_AVG["hard_hit_rate"],
-        whiff_rate=compute_whiff_rate(sub, w) if n > 0 else LEAGUE_AVG["whiff_rate"],
+        swing_rate=swing_rate,
+        chase_rate=chase_rate,
+        contact_rate=contact_rate,
+        hard_hit_rate=hard_hit_rate,
+        whiff_rate=whiff_rate,
         swing_rate_by_count=compute_swing_rate_by_count(sub, w) if n > 0 else {},
         contact_rate_by_pitch_type=compute_contact_rate_by_pitch_type(sub, w) if n > 0 else {},
+        zone_swing_rates=compute_zone_swing_rates(sub, w, swing_rate) if n > 0 else {z: swing_rate for z in ALL_ZONES},
+        zone_whiff_rates=compute_zone_whiff_rates(sub, w, whiff_rate) if n > 0 else {z: whiff_rate for z in ALL_ZONES},
+        family_swing_rates=compute_family_swing_rates(sub, w, swing_rate) if n > 0 else {f: swing_rate for f in PITCH_FAMILY_LIST},
+        family_whiff_rates=compute_family_whiff_rates(sub, w, whiff_rate) if n > 0 else {f: whiff_rate for f in PITCH_FAMILY_LIST},
         sample_size=n,
         is_thin_sample=is_thin,
     )
@@ -290,16 +480,38 @@ def build_profile(
 # Feature dict for model input
 # ---------------------------------------------------------------------------
 
+# All pitch types for which we expose per-pitch-type contact rates as features.
+# ST (sweeper, 2023+ code) absorbs pre-2023 SV; SV slot is slurve only.
+PITCH_TYPE_CONTACT_KEYS = ["FF", "CH", "CU", "FC", "KN", "SC", "SI", "SL", "SV", "FS", "ST"]
+
+
 def profile_to_feature_dict(profile: HitterProfile) -> dict:
     # hitter_stand_enc is intentionally excluded here — it is already set
     # per-row by encode_handedness() in preprocessing from the actual stand column.
-    return {
-        "hitter_swing_rate": profile.swing_rate,
-        "hitter_chase_rate": profile.chase_rate,
-        "hitter_contact_rate": profile.contact_rate,
+    d = {
+        "hitter_swing_rate":    profile.swing_rate,
+        "hitter_chase_rate":    profile.chase_rate,
+        "hitter_contact_rate":  profile.contact_rate,
         "hitter_hard_hit_rate": profile.hard_hit_rate,
-        "hitter_whiff_rate": profile.whiff_rate,
+        "hitter_whiff_rate":    profile.whiff_rate,
     }
+    # Per-pitch-type contact rates (11 features)
+    by_type = profile.contact_rate_by_pitch_type
+    for pt in PITCH_TYPE_CONTACT_KEYS:
+        d[f"hitter_contact_rate_{pt}"] = by_type.get(pt, profile.contact_rate)
+    # Zone swing rates (13 features: zones 1-9, 11-14)
+    for z in ALL_ZONES:
+        d[f"hitter_swing_rate_z{z}"] = profile.zone_swing_rates.get(z, LEAGUE_AVG["swing_rate"])
+    # Zone whiff rates (13 features)
+    for z in ALL_ZONES:
+        d[f"hitter_whiff_rate_z{z}"] = profile.zone_whiff_rates.get(z, LEAGUE_AVG["whiff_rate"])
+    # Pitch family swing rates (4 features)
+    for fam in PITCH_FAMILY_LIST:
+        d[f"hitter_swing_rate_{fam}"] = profile.family_swing_rates.get(fam, LEAGUE_AVG["swing_rate"])
+    # Pitch family whiff rates (4 features)
+    for fam in PITCH_FAMILY_LIST:
+        d[f"hitter_whiff_rate_{fam}"] = profile.family_whiff_rates.get(fam, LEAGUE_AVG["whiff_rate"])
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +551,10 @@ def get_league_average_profile() -> HitterProfile:
         player_name="League Average",
         stand="R",
         **LEAGUE_AVG,
+        zone_swing_rates={z: LEAGUE_AVG["swing_rate"] for z in ALL_ZONES},
+        zone_whiff_rates={z: LEAGUE_AVG["whiff_rate"] for z in ALL_ZONES},
+        family_swing_rates={f: LEAGUE_AVG["swing_rate"] for f in PITCH_FAMILY_LIST},
+        family_whiff_rates={f: LEAGUE_AVG["whiff_rate"] for f in PITCH_FAMILY_LIST},
         sample_size=0,
         is_thin_sample=True,
     )
@@ -351,7 +567,7 @@ def get_league_average_profile() -> HitterProfile:
 def merge_profiles_into_df(
     df: pd.DataFrame,
     profile_dir: Path = PROFILE_DIR,
-    date_cutoff: str = "2023-01-01",
+    date_cutoff: str = "2025-01-01",
 ) -> pd.DataFrame:
     """
     For each unique batter, build (or load) their profile using only
@@ -361,6 +577,7 @@ def merge_profiles_into_df(
     """
     unique_batters = df["batter"].unique()
     print(f"Building profiles for {len(unique_batters):,} unique batters...")
+    _build_name_cache(list(unique_batters))
 
     records = []
     for player_id in unique_batters:
@@ -379,6 +596,11 @@ def merge_profiles_into_df(
         records.append(row)
 
     profile_df = pd.DataFrame(records)
+
+    # Drop pre-existing hitter profile columns from df to prevent _x/_y suffix collision
+    profile_cols = [c for c in profile_df.columns if c != "batter"]
+    df = df.drop(columns=[c for c in profile_cols if c in df.columns])
+
     merged = df.merge(profile_df, on="batter", how="left")
 
     # Fill any unmatched batters with league average
@@ -394,26 +616,49 @@ def merge_profiles_into_df(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _print_profile(profile: HitterProfile) -> None:
+    thin = "(thin — below 200 weighted PAs)" if profile.is_thin_sample else ""
+    print(f"\n  {profile.player_name} (id={profile.player_id})")
+    print(f"    Sample size : {profile.sample_size:,} pitches {thin}")
+    print(f"    Swing rate  : {profile.swing_rate:.3f}")
+    print(f"    Chase rate  : {profile.chase_rate:.3f}")
+    print(f"    Contact rate: {profile.contact_rate:.3f}")
+    print(f"    Hard hit    : {profile.hard_hit_rate:.3f}")
+    print(f"    Whiff rate  : {profile.whiff_rate:.3f}")
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Build hitter profiles")
-    parser.add_argument("--name", type=str, help="Build profile for a specific player by name")
+    parser.add_argument("--name",  type=str, help="Build profile for a single player by name")
+    parser.add_argument("--names", type=str, nargs="+", help="Build profiles for multiple players by name")
     args = parser.parse_args()
 
     df = pd.read_parquet("data/processed/statcast_processed.parquet")
 
-    if args.name:
+    if args.names:
+        # Targeted multi-player build — does NOT touch any other profiles
+        _build_name_cache([])  # pre-warm lookup table once
+        targets = args.names
+        print(f"\nBuilding profiles for {len(targets)} player(s)...\n")
+        for name in targets:
+            try:
+                pid = get_player_id(name, df)
+                _NAME_CACHE[pid] = _NAME_CACHE.get(pid) or name  # fallback if lookup missed
+                profile = build_profile(pid, df)
+                save_profile(profile)
+                _print_profile(profile)
+            except Exception as e:
+                print(f"  ERROR — {name}: {e}")
+
+    elif args.name:
+        _build_name_cache([])
         pid = get_player_id(args.name, df)
         profile = build_profile(pid, df)
         save_profile(profile)
-        print(f"\n{profile.player_name} (id={profile.player_id})")
-        print(f"  Sample size : {profile.sample_size:,} pitches {'(thin — below 200 weighted PAs)' if profile.is_thin_sample else ''}")
-        print(f"  Swing rate  : {profile.swing_rate:.3f}")
-        print(f"  Chase rate  : {profile.chase_rate:.3f}")
-        print(f"  Contact rate: {profile.contact_rate:.3f}")
-        print(f"  Hard hit    : {profile.hard_hit_rate:.3f}")
-        print(f"  Whiff rate  : {profile.whiff_rate:.3f}")
+        _print_profile(profile)
+
     else:
         merged = merge_profiles_into_df(df)
         merged.to_parquet("data/processed/statcast_processed.parquet", index=False)
