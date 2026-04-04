@@ -126,9 +126,20 @@ def predict_batch(df: pd.DataFrame, profile_features: dict,
     Assemble feature matrix and return (raw_probs, calibrated_probs).
     If no calibrator, calibrated_probs == raw_probs.
     """
+    from src.data.preprocess import PITCHER_FEATURES
     for col, val in profile_features.items():
         if col in feature_cols:
             df[col] = val
+
+    # Merge pitcher identity features per row
+    if any(f in feature_cols for f in PITCHER_FEATURES) and "pitcher" in df.columns:
+        from src.pitchers.features import load_pitcher_features
+        pitcher_df = load_pitcher_features()
+        df = df.drop(columns=[c for c in PITCHER_FEATURES if c in df.columns])
+        df = df.merge(pitcher_df, on="pitcher", how="left")
+        for col in PITCHER_FEATURES:
+            if col in feature_cols:
+                df[col] = df[col].fillna(pitcher_df[col].median())
 
     missing = [c for c in feature_cols if c not in df.columns]
     if missing:

@@ -220,12 +220,32 @@ def load_profile_features(player_id: int) -> dict:
     return profile_to_feature_dict(profile)
 
 
+_pitcher_df_eval = None
+
+def _get_pitcher_df():
+    global _pitcher_df_eval
+    if _pitcher_df_eval is None:
+        from src.pitchers.features import load_pitcher_features
+        _pitcher_df_eval = load_pitcher_features()
+    return _pitcher_df_eval
+
+
 def predict_batch(df: pd.DataFrame, pf: dict, feature_cols: list,
                   model, calibrator) -> tuple:
+    from src.data.preprocess import PITCHER_FEATURES
     df = df.copy()
     for col, val in pf.items():
         if col in feature_cols:
             df[col] = val
+
+    # Merge pitcher identity features per row using the pitcher column
+    if any(f in feature_cols for f in PITCHER_FEATURES) and "pitcher" in df.columns:
+        pitcher_df = _get_pitcher_df()
+        df = df.drop(columns=[c for c in PITCHER_FEATURES if c in df.columns])
+        df = df.merge(pitcher_df, on="pitcher", how="left")
+        for col in PITCHER_FEATURES:
+            if col in feature_cols:
+                df[col] = df[col].fillna(pitcher_df[col].median())
 
     missing = [c for c in feature_cols if c not in df.columns]
     if missing:

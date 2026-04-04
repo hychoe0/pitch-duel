@@ -150,6 +150,14 @@ HITTER_FAMILY_FEATURES = [
     "hitter_whiff_rate_offspeed", "hitter_whiff_rate_other",
 ]
 
+PITCHER_FEATURES = [
+    "pitcher_avg_release_pos_z",
+    "pitcher_avg_release_pos_x",
+    "pitcher_avg_extension",
+    "pitcher_avg_speed",
+    "pitcher_slot_angle",
+]
+
 ALL_FEATURES = (
     PITCH_FEATURES
     + CONTEXT_FEATURES
@@ -157,6 +165,7 @@ ALL_FEATURES = (
     + HITTER_PITCH_TYPE_FEATURES
     + HITTER_ZONE_FEATURES
     + HITTER_FAMILY_FEATURES
+    + PITCHER_FEATURES
 )
 
 
@@ -392,6 +401,22 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     df["era_flag_enc"] = make_era_flag(df)
     df["spin_to_velo_ratio"] = make_spin_to_velo_ratio(df)
     df["sample_weight"] = make_sample_weights(df)
+
+    # Pitcher identity features
+    from src.pitchers.features import (
+        PITCHER_FEATURES_PATH, build_pitcher_features, load_pitcher_features
+    )
+    if not PITCHER_FEATURES_PATH.exists():
+        print("Building pitcher features...")
+        pitcher_df = build_pitcher_features(df)
+    else:
+        pitcher_df = load_pitcher_features()
+    # Drop pre-existing pitcher feature columns to prevent _x/_y collisions on re-run
+    df = df.drop(columns=[c for c in PITCHER_FEATURES if c in df.columns])
+    df = df.merge(pitcher_df, on="pitcher", how="left")
+    # Fill any unmatched pitchers with population medians
+    for col in PITCHER_FEATURES:
+        df[col] = df[col].fillna(pitcher_df[col].median())
 
     train, test = split_data(df)
     save_processed(df, train, test)

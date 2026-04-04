@@ -195,6 +195,33 @@ def build_feature_row(
 
 
 # ---------------------------------------------------------------------------
+# Pitcher feature resolution
+# ---------------------------------------------------------------------------
+
+_pitcher_df_cache: dict = {}
+
+
+def _load_pitcher_df():
+    """Load pitcher features parquet once, cache in memory."""
+    if "df" not in _pitcher_df_cache:
+        from src.pitchers.features import load_pitcher_features
+        _pitcher_df_cache["df"] = load_pitcher_features()
+    return _pitcher_df_cache["df"]
+
+
+def _resolve_pitcher_features(pitcher_id: int = None) -> dict:
+    """
+    Return the 5 pitcher aggregate features for inference.
+    Falls back to population medians if pitcher_id is None or unknown.
+    """
+    from src.pitchers.features import get_pitcher_feature_row, get_median_pitcher_features
+    pitcher_df = _load_pitcher_df()
+    if pitcher_id is None:
+        return get_median_pitcher_features(pitcher_df)
+    return get_pitcher_feature_row(pitcher_id, pitcher_df)
+
+
+# ---------------------------------------------------------------------------
 # Hitter profile resolution
 # ---------------------------------------------------------------------------
 
@@ -238,6 +265,7 @@ def _resolve_hitter_profile(hitter_name: str):
 def predict_hit_probability(
     pitch: dict,
     hitter_name: str,
+    pitcher_id: int = None,
     model_dir: Path = MODEL_DIR,
 ) -> dict:
     """
@@ -246,6 +274,8 @@ def predict_hit_probability(
     Args:
         pitch: dict with all raw pitch keys (see REQUIRED_RAW_KEYS)
         hitter_name: player name string (e.g. "Shohei Ohtani")
+        pitcher_id: optional MLBAM pitcher ID — if provided, looks up that
+                    pitcher's aggregate features; otherwise uses population medians.
         model_dir: path to directory containing trained model artifacts
 
     Returns:
@@ -263,7 +293,10 @@ def predict_hit_probability(
     validate_pitch_dict(pitch)
     model, feature_cols, encodings, calibrator = load_model(model_dir)
     hitter_features, is_thin, used_fallback = _resolve_hitter_profile(hitter_name)
-    row = build_feature_row(pitch, hitter_features, feature_cols, encodings)
+    pitcher_features = _resolve_pitcher_features(pitcher_id)
+    # Merge hitter + pitcher features; pitcher features fill the 5 PITCHER_FEATURES slots
+    combined_features = {**hitter_features, **pitcher_features}
+    row = build_feature_row(pitch, combined_features, feature_cols, encodings)
     raw_xwoba = float(max(0.0, model.predict(row)[0]))
     cal_xwoba = float(calibrator.predict([raw_xwoba])[0]) if calibrator is not None else raw_xwoba
     cal_xwoba = max(0.0, cal_xwoba)
