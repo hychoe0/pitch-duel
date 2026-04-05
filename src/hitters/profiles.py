@@ -52,13 +52,13 @@ ALL_ZONES    = STRIKE_ZONES + BALL_ZONES
 
 # Zone layout (from catcher's perspective):
 #   11 (high-inside) | 12 (high-outside)
-#   ┌───┬───┬───┐
-#   │ 1 │ 2 │ 3 │  ← top row
-#   ├───┼───┼───┤
-#   │ 4 │ 5 │ 6 │  ← middle row
-#   ├───┼───┼───┤
-#   │ 7 │ 8 │ 9 │  ← bottom row
-#   └───┴───┴───┘
+#              ┌───┬───┬───┐
+#              │ 1 │ 2 │ 3 │  ← top row
+#              ├───┼───┼───┤
+#              │ 4 │ 5 │ 6 │  ← middle row
+#              ├───┼───┼───┤
+#              │ 7 │ 8 │ 9 │  ← bottom row
+#              └───┴───┴───┘
 #   13 (low-inside)  | 14 (low-outside)
 
 PITCH_FAMILIES = {
@@ -426,11 +426,20 @@ def build_profile(
     player_id: int,
     df: pd.DataFrame,
     date_cutoff: str = "2025-01-01",
+    pitcher_batter_ids: frozenset = None,
 ) -> HitterProfile:
     """
     Build a HitterProfile from the player's pitches before date_cutoff.
     Thin-sample blending applied automatically.
+
+    Raises ValueError if player_id is in pitcher_batter_ids — caller should
+    substitute a league-average profile instead of building one.
     """
+    if pitcher_batter_ids is not None and player_id in pitcher_batter_ids:
+        raise ValueError(
+            f"Player {player_id} is a pitcher-batter — "
+            "profile build skipped. Use league-average profile."
+        )
     cutoff = pd.Timestamp(date_cutoff)
     sub = df[(df["batter"] == player_id) & (df["game_date"] < cutoff)].copy()
 
@@ -568,19 +577,34 @@ def merge_profiles_into_df(
     df: pd.DataFrame,
     profile_dir: Path = PROFILE_DIR,
     date_cutoff: str = "2025-01-01",
+    pitcher_batter_ids: frozenset = None,
 ) -> pd.DataFrame:
     """
     For each unique batter, build (or load) their profile using only
     pre-cutoff data, then broadcast profile features onto all their rows.
 
+    Pitcher-batters (pre-2022 NL) are skipped — their rows receive league-
+    average profile values via the fillna pass at the end.
+
     Builds a lookup DataFrame and does a single pd.merge — not row-by-row.
     """
+    if pitcher_batter_ids is None:
+        from src.data.preprocess import identify_pitcher_batters
+        pitcher_batter_ids = identify_pitcher_batters(df)
+
     unique_batters = df["batter"].unique()
-    print(f"Building profiles for {len(unique_batters):,} unique batters...")
+    n_skipped = sum(1 for pid in unique_batters if pid in pitcher_batter_ids)
+    print(
+        f"Building profiles for {len(unique_batters):,} unique batters "
+        f"({n_skipped:,} pitcher-batters skipped → league average)"
+    )
     _build_name_cache(list(unique_batters))
 
     records = []
     for player_id in unique_batters:
+        if player_id in pitcher_batter_ids:
+            continue  # league average applied via fillna after merge
+
         path = profile_dir / f"{player_id}.json"
         profile = None
         if path.exists():
@@ -589,7 +613,7 @@ def merge_profiles_into_df(
             except (json.JSONDecodeError, KeyError):
                 path.unlink()  # delete corrupted file, rebuild below
         if profile is None:
-            profile = build_profile(player_id, df, date_cutoff)
+            profile = build_profile(player_id, df, date_cutoff, pitcher_batter_ids)
             save_profile(profile, profile_dir)
 
         row = {"batter": player_id, **profile_to_feature_dict(profile)}

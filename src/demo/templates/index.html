@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Duel — Model Testing Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Courier New", monospace;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #30363d;
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            color: #58a6ff;
+            font-size: 1.8em;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #8b949e;
+            font-size: 0.9em;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #30363d;
+            flex-wrap: wrap;
+        }
+
+        .tab-button {
+            padding: 10px 20px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            color: #8b949e;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9em;
+            border-radius: 4px 4px 0 0;
+            transition: all 0.2s;
+        }
+
+        .tab-button:hover {
+            color: #c9d1d9;
+            border-color: #58a6ff;
+        }
+
+        .tab-button.active {
+            color: #58a6ff;
+            border-color: #58a6ff;
+            border-bottom: 2px solid #0d1117;
+            background: #0d1117;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.2s;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .panel h2 {
+            color: #58a6ff;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #8b949e;
+            font-size: 0.9em;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="file"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 8px 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.9em;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #238636;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 0.9em;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #2ea043;
+        }
+
+        button:active {
+            background: #1a7f37;
+        }
+
+        button.secondary {
+            background: #30363d;
+            color: #c9d1d9;
+        }
+
+        button.secondary:hover {
+            background: #484f58;
+        }
+
+        .result {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .result-label {
+            color: #8b949e;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+
+        .xwoba-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .xwoba-danger { background: #3d1f1a; color: #f85149; }
+        .xwoba-warning { background: #3d2817; color: #d29922; }
+        .xwoba-neutral { background: #1f2d3d; color: #79c0ff; }
+        .xwoba-good { background: #1a3a1a; color: #3fb950; }
+
+        .interpretation {
+            color: #c9d1d9;
+            font-size: 0.95em;
+            margin-top: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 0.85em;
+        }
+
+        th {
+            background: #161b22;
+            color: #8b949e;
+            padding: 8px;
+            text-align: left;
+            border-bottom: 2px solid #30363d;
+        }
+
+        td {
+            padding: 8px;
+            border-bottom: 1px solid #30363d;
+            color: #c9d1d9;
+        }
+
+        tr:hover td {
+            background: #0d1117;
+        }
+
+        .error {
+            background: #3d1f1a;
+            color: #f85149;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .success {
+            background: #1a3a1a;
+            color: #3fb950;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .pitch-row {
+            display: grid;
+            grid-template-columns: 80px 80px 80px 80px auto;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: end;
+        }
+
+        .pitch-row input {
+            font-size: 0.85em;
+        }
+
+        .pitch-row button {
+            padding: 8px;
+            margin: 0;
+        }
+
+        .at-bat-summary {
+            background: #1a2332;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .at-bat-summary p {
+            margin-bottom: 8px;
+            color: #8b949e;
+        }
+
+        .at-bat-summary strong {
+            color: #c9d1d9;
+        }
+
+        .loading {
+            display: none;
+            color: #8b949e;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .defaults-note {
+            font-size: 0.8em;
+            color: #6e7681;
+            margin-top: 10px;
+            padding: 10px;
+            background: #0d1117;
+            border-left: 3px solid #30363d;
+        }
+
+        /* Game log specific styles */
+        .gl-pa-row {
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .gl-pa-row:hover td {
+            background: #1a2332;
+        }
+        .gl-pa-detail {
+            display: none;
+        }
+        .gl-pa-detail.open {
+            display: table-row;
+        }
+        .gl-pa-detail td {
+            padding: 0;
+        }
+        .gl-inner-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0;
+            background: #0d1117;
+        }
+        .gl-inner-table td {
+            border-bottom: 1px solid #21262d;
+            padding: 6px 8px;
+            font-size: 0.82em;
+        }
+        .gl-inner-table th {
+            background: #0d1117;
+            border-bottom: 1px solid #21262d;
+            padding: 6px 8px;
+            font-size: 0.82em;
+        }
+        .pa-row-with-zone {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            padding: 10px;
+        }
+        .pa-pitch-table-wrap {
+            flex: 1;
+            overflow-x: auto;
+        }
+        .breakdown-table {
+            max-width: 600px;
+        }
+        .breakdown-table td, .breakdown-table th {
+            padding: 6px 12px;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .summary-card {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+        }
+        .summary-card .val {
+            font-size: 1.6em;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .summary-card .lbl {
+            font-size: 0.8em;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+        .filter-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .filter-row label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.82em;
+            color: #8b949e;
+            cursor: pointer;
+        }
+        .filter-row input[type="checkbox"] {
+            width: auto;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Pitch Duel</h1>
+        <p class="subtitle">Model Testing Interface</p>
+    </header>
+
+    <div class="container">
+        <!-- Tab buttons -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="switchTab('single', this)">Single Pitch</button>
+            <button class="tab-button" onclick="switchTab('atbat', this)">At-Bat Builder</button>
+            <button class="tab-button" onclick="switchTab('batch', this)">Batch Prediction</button>
+            <button class="tab-button" onclick="switchTab('gamelog', this)">Hitter Game Log</button>
+        </div>
+
+        <!-- TAB 1: Single Pitch -->
+        <div id="single" class="tab-content active">
+            <div class="panel">
+                <h2>Single Pitch Prediction</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Hitter Name</label>
+                        <select id="hitter_single" required>
+                            <option>Loading...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Pitcher (optional)</label>
+                        <select id="pitcher_single">
+                            <option value="">League Average</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Pitch Type</label>
+                        <select id="pitch_type">
+                            <option>FF</option>
+                            <option>SI</option>
+                            <option>FC</option>
+                            <option>SL</option>
+                            <option>CU</option>
+                            <option>CH</option>
+                            <option>FS</option>
+                            <option>SV</option>
+                            <option>KC</option>
+                            <option>CS</option>
+                            <option>KN</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Release Speed (mph)</label>
+                        <input type="number" id="release_speed" value="95" step="0.1" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Plate X (feet)</label>
+                        <input type="number" id="plate_x" value="0.0" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Plate Z (feet)</label>
+                        <input type="number" id="plate_z" value="2.5" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Balls</label>
+                        <input type="number" id="balls_single" value="0" min="0" max="3" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Strikes</label>
+                        <input type="number" id="strikes_single" value="0" min="0" max="2" required>
+                    </div>
+                </div>
+
+                <button onclick="predictSingle()">Predict xwOBA</button>
+                <div class="loading" id="loading_single"></div>
+
+                <div id="result_single"></div>
+
+                <div class="defaults-note">
+                    Other pitch features use defaults: release_spin_rate=2400, pfx_x=-0.5, pfx_z=1.2, release_pos_x=-1.5, release_pos_z=6.0, release_extension=6.3
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: At-Bat Builder -->
+        <div id="atbat" class="tab-content">
+            <div class="panel">
+                <h2>At-Bat Simulator</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Hitter Name</label>
+                        <select id="hitter_atbat" required>
+                            <option>Loading...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Pitcher (optional)</label>
+                        <select id="pitcher_atbat">
+                            <option value="">League Average</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <p style="color: #8b949e; margin-bottom: 10px;">Add pitches to simulate an at-bat:</p>
+                    <div id="pitch_list"></div>
+                    <button class="secondary" onclick="addPitch()">+ Add Pitch</button>
+                </div>
+
+                <button onclick="simulateAtBat()">Simulate At-Bat</button>
+                <div class="loading" id="loading_atbat"></div>
+
+                <div id="result_atbat"></div>
+            </div>
+        </div>
+
+        <!-- TAB 3: Batch Prediction -->
+        <div id="batch" class="tab-content">
+            <div class="panel">
+                <h2>Batch Prediction</h2>
+
+                <div class="form-group">
+                    <label>Hitter Name</label>
+                    <select id="hitter_batch" required>
+                        <option>Loading...</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Pitcher (optional)</label>
+                    <select id="pitcher_batch">
+                        <option value="">League Average</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Pitch Data (CSV or JSON, one pitch per line)</label>
+                    <textarea id="batch_data" placeholder="pitch_type,release_speed,plate_x,plate_z&#10;FF,95,0.0,2.5&#10;SL,87,0.7,1.8&#10;CU,80,-0.2,2.0" rows="8"></textarea>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <p style="color: #8b949e; font-size: 0.85em;">
+                        CSV format: pitch_type, release_speed, plate_x, plate_z (other fields use defaults)<br/>
+                        JSON format: one object per line with {"pitch_type": "FF", "release_speed": 95, ...}
+                    </p>
+                </div>
+
+                <button onclick="predictBatch()">Run Prediction</button>
+                <div class="loading" id="loading_batch"></div>
+
+                <div id="result_batch"></div>
+            </div>
+        </div>
+
+        <!-- TAB 4: Hitter Game Log -->
+        <div id="gamelog" class="tab-content">
+            <div class="panel">
+                <h2>Hitter Game Log Evaluation</h2>
+                <p style="color: #8b949e; font-size: 0.85em; margin-bottom: 15px;">
+                    Upload a Baseball Savant CSV of all pitches thrown TO a specific hitter.
+                    The model evaluates every pitch and compares predicted xwOBA to actual outcomes.
+                </p>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Baseball Savant CSV File</label>
+                        <input type="file" id="gl_file" accept=".csv">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Or paste CSV text directly</label>
+                    <textarea id="gl_csv_text" placeholder="Paste full Baseball Savant CSV here..." rows="4"></textarea>
+                </div>
+
+                <button onclick="runGameLog()">Evaluate Game Log</button>
+                <div class="loading" id="loading_gamelog"></div>
+
+                <div id="result_gamelog"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ────────────────────────────────────────────────────────────────────────
+        // Tab switching
+        // ────────────────────────────────────────────────────────────────────────
+
+        function switchTab(tabName, btn) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            btn.classList.add('active');
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Data loading (hitters, pitchers)
+        // ────────────────────────────────────────────────────────────────────────
+
+        async function loadHitters() {
+            try {
+                const res = await fetch('/hitters');
+                const data = await res.json();
+                const options = data.hitters.map(h => `<option>${h}</option>`).join('');
+                document.getElementById('hitter_single').innerHTML = options;
+                document.getElementById('hitter_atbat').innerHTML = options;
+                document.getElementById('hitter_batch').innerHTML = options;
+            } catch (e) {
+                console.error('Error loading hitters:', e);
+            }
+        }
+
+        async function loadPitchers() {
+            try {
+                const res = await fetch('/pitchers');
+                const data = await res.json();
+                const options = data.pitchers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+                document.getElementById('pitcher_single').innerHTML = '<option value="">League Average</option>' + options;
+                document.getElementById('pitcher_atbat').innerHTML = '<option value="">League Average</option>' + options;
+                document.getElementById('pitcher_batch').innerHTML = '<option value="">League Average</option>' + options;
+            } catch (e) {
+                console.error('Error loading pitchers:', e);
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Strike Zone SVG
+        // ────────────────────────────────────────────────────────────────────────
+
+        const ZONE_X_MIN = -0.85, ZONE_X_MAX = 0.85;
+        const ZONE_Z_MIN = 1.5, ZONE_Z_MAX = 3.5;
+        const CHASE_BORDER = 0.5;
+
+        function pitchToSvg(plate_x, plate_z, svgSize) {
+            // Map plate coords to SVG pixel coords
+            // x: [-2.0, 2.0] → [0, svgSize]
+            // z: [0.5, 4.5] → [svgSize, 0]  (inverted: high z = top of SVG)
+            const xRange = 4.0, zRange = 4.0;
+            const xMin = -2.0, zMin = 0.5;
+            const px = ((plate_x - xMin) / xRange) * svgSize;
+            const py = ((1 - (plate_z - zMin) / zRange)) * svgSize;
+            return { x: px, y: py };
+        }
+
+        function ftToPx(ft, svgSize) {
+            return (ft / 4.0) * svgSize;
+        }
+
+        function buildZoneSvg(pitches, svgSize, options = {}) {
+            /*
+             * pitches: array of {plate_x, plate_z, pitch_type, xwoba_pred, quality_color, pitch_num, description?, event?}
+             * svgSize: pixel width/height
+             * options: {filters: {pitchTypes: Set, outcomes: Set}, showNumbers: bool}
+             */
+            const showNumbers = options.showNumbers !== false;
+            const filters = options.filters || {};
+            const dotRadius = svgSize >= 400 ? 14 : 10;
+            const fontSize = svgSize >= 400 ? 11 : 8;
+
+            // Zone rect coords
+            const zTL = pitchToSvg(ZONE_X_MIN, ZONE_Z_MAX, svgSize);
+            const zBR = pitchToSvg(ZONE_X_MAX, ZONE_Z_MIN, svgSize);
+            const zW = zBR.x - zTL.x;
+            const zH = zBR.y - zTL.y;
+
+            // Chase rect coords
+            const cTL = pitchToSvg(ZONE_X_MIN - CHASE_BORDER, ZONE_Z_MAX + CHASE_BORDER, svgSize);
+            const cBR = pitchToSvg(ZONE_X_MAX + CHASE_BORDER, ZONE_Z_MIN - CHASE_BORDER, svgSize);
+            const cW = cBR.x - cTL.x;
+            const cH = cBR.y - cTL.y;
+
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 ${svgSize} ${svgSize}" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;">`;
+
+            // Chase zone (dashed)
+            svg += `<rect x="${cTL.x}" y="${cTL.y}" width="${cW}" height="${cH}" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>`;
+
+            // Strike zone (solid)
+            svg += `<rect x="${zTL.x}" y="${zTL.y}" width="${zW}" height="${zH}" fill="none" stroke="#8b949e" stroke-width="2"/>`;
+
+            // Zone grid lines (3x3)
+            const thirdW = zW / 3;
+            const thirdH = zH / 3;
+            for (let i = 1; i < 3; i++) {
+                svg += `<line x1="${zTL.x + thirdW * i}" y1="${zTL.y}" x2="${zTL.x + thirdW * i}" y2="${zTL.y + zH}" stroke="#21262d" stroke-width="1"/>`;
+                svg += `<line x1="${zTL.x}" y1="${zTL.y + thirdH * i}" x2="${zTL.x + zW}" y2="${zTL.y + thirdH * i}" stroke="#21262d" stroke-width="1"/>`;
+            }
+
+            // Home plate pentagon
+            const hpCenter = pitchToSvg(0, 0.9, svgSize);
+            const hpW = ftToPx(17/12, svgSize); // 17 inches
+            svg += `<polygon points="${hpCenter.x},${hpCenter.y + 6} ${hpCenter.x - hpW/2},${hpCenter.y} ${hpCenter.x - hpW/2},${hpCenter.y - 6} ${hpCenter.x + hpW/2},${hpCenter.y - 6} ${hpCenter.x + hpW/2},${hpCenter.y}" fill="none" stroke="#484f58" stroke-width="1"/>`;
+
+            // Pitch dots
+            const filteredPitches = pitches.filter(p => {
+                if (filters.pitchTypes && filters.pitchTypes.size > 0 && !filters.pitchTypes.has(p.pitch_type)) return false;
+                if (filters.outcomes && filters.outcomes.size > 0) {
+                    const outcome = p.event || p.description || '';
+                    if (!filters.outcomes.has(outcome)) return false;
+                }
+                return true;
+            });
+
+            for (const p of filteredPitches) {
+                const pos = pitchToSvg(p.plate_x, p.plate_z, svgSize);
+                const color = p.quality_color || xwobaColor(p.xwoba_pred);
+
+                // Tooltip data attributes
+                const tooltip = `${p.pitch_type} #${p.pitch_num} | ${p.speed || ''}mph | xwOBA: ${(p.xwoba_pred || 0).toFixed(3)}${p.description ? ' | ' + p.description : ''}`;
+
+                svg += `<circle cx="${pos.x}" cy="${pos.y}" r="${dotRadius}" fill="${color}" fill-opacity="0.85" stroke="#0d1117" stroke-width="1.5">`;
+                svg += `<title>${tooltip}</title></circle>`;
+
+                if (showNumbers) {
+                    svg += `<text x="${pos.x}" y="${pos.y + fontSize/3}" text-anchor="middle" fill="#fff" font-size="${fontSize}" font-family="Courier New" font-weight="bold" pointer-events="none">${p.pitch_num}</text>`;
+                }
+            }
+
+            svg += '</svg>';
+            return svg;
+        }
+
+        function xwobaColor(xw) {
+            if (xw < 0.04) return '#3fb950';
+            if (xw < 0.08) return '#3fb950';
+            if (xw < 0.15) return '#79c0ff';
+            if (xw < 0.25) return '#d29922';
+            return '#f85149';
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Single Pitch Prediction
+        // ────────────────────────────────────────────────────────────────────────
+
+        async function predictSingle() {
+            const hitter_name = document.getElementById('hitter_single').value;
+            const pitcher_id = document.getElementById('pitcher_single').value || null;
+            const pitch_type = document.getElementById('pitch_type').value;
+            const release_speed = parseFloat(document.getElementById('release_speed').value);
+            const plate_x = parseFloat(document.getElementById('plate_x').value);
+            const plate_z = parseFloat(document.getElementById('plate_z').value);
+            const balls = parseInt(document.getElementById('balls_single').value);
+            const strikes = parseInt(document.getElementById('strikes_single').value);
+
+            const loading = document.getElementById('loading_single');
+            loading.textContent = 'Predicting...';
+            loading.classList.add('active');
+
+            try {
+                const res = await fetch('/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        hitter_name,
+                        pitcher_id,
+                        pitch: {
+                            pitch_type,
+                            release_speed,
+                            plate_x,
+                            plate_z,
+                            balls,
+                            strikes,
+                        },
+                    }),
+                });
+
+                loading.classList.remove('active');
+                const data = await res.json();
+
+                if (!res.ok) {
+                    displayError('result_single', data.error || 'Prediction failed');
+                    return;
+                }
+
+                const xw = data.xwoba;
+                const qColor = data.quality_color || xwobaColor(xw);
+
+                // Build mini zone SVG with single pitch dot
+                const zoneSvg = buildZoneSvg([{
+                    plate_x, plate_z, pitch_type, xwoba_pred: xw,
+                    quality_color: qColor, pitch_num: 1, speed: release_speed
+                }], 200);
+
+                const html = `
+                    <div class="result" style="display:flex; gap:20px; align-items:center;">
+                        <div style="flex:1;">
+                            <div class="result-label">${hitter_name} | ${pitch_type} ${release_speed} mph | ${balls}-${strikes}</div>
+                            <div class="xwoba-value" style="background:${hexToRgba(qColor, 0.15)};color:${qColor};">${xw.toFixed(4)}</div>
+                            <div class="interpretation" style="color:${qColor};">${data.interpretation} (${data.zone})</div>
+                        </div>
+                        <div>${zoneSvg}</div>
+                    </div>
+                `;
+                document.getElementById('result_single').innerHTML = html;
+            } catch (e) {
+                loading.classList.remove('active');
+                displayError('result_single', e.message);
+            }
+        }
+
+        function hexToRgba(hex, alpha) {
+            const r = parseInt(hex.slice(1,3), 16);
+            const g = parseInt(hex.slice(3,5), 16);
+            const b = parseInt(hex.slice(5,7), 16);
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // At-Bat Simulator
+        // ────────────────────────────────────────────────────────────────────────
+
+        let pitches_list = [];
+
+        function addPitch() {
+            const idx = pitches_list.length;
+            pitches_list.push({
+                pitch_type: 'FF',
+                release_speed: 95,
+                plate_x: 0,
+                plate_z: 2.5,
+            });
+
+            const html = `
+                <div class="pitch-row" id="pitch_${idx}">
+                    <select onchange="pitches_list[${idx}].pitch_type = this.value">
+                        <option>FF</option>
+                        <option>SI</option>
+                        <option>SL</option>
+                        <option>CU</option>
+                        <option>CH</option>
+                        <option>FS</option>
+                    </select>
+                    <input type="number" step="0.1" value="95" placeholder="MPH" onchange="pitches_list[${idx}].release_speed = parseFloat(this.value)">
+                    <input type="number" step="0.1" value="0" placeholder="Plate X" onchange="pitches_list[${idx}].plate_x = parseFloat(this.value)">
+                    <input type="number" step="0.1" value="2.5" placeholder="Plate Z" onchange="pitches_list[${idx}].plate_z = parseFloat(this.value)">
+                    <button class="secondary" style="padding: 8px 12px; width: auto;" onclick="removePitch(${idx})">Remove</button>
+                </div>
+            `;
+            document.getElementById('pitch_list').insertAdjacentHTML('beforeend', html);
+        }
+
+        function removePitch(idx) {
+            pitches_list[idx] = null;
+            document.getElementById(`pitch_${idx}`).remove();
+        }
+
+        async function simulateAtBat() {
+            const hitter_name = document.getElementById('hitter_atbat').value;
+            const pitcher_id = document.getElementById('pitcher_atbat').value || null;
+            const pitches = pitches_list.filter(p => p !== null);
+
+            if (pitches.length === 0) {
+                displayError('result_atbat', 'Add at least one pitch');
+                return;
+            }
+
+            const loading = document.getElementById('loading_atbat');
+            loading.textContent = 'Simulating at-bat...';
+            loading.classList.add('active');
+
+            try {
+                const res = await fetch('/at_bat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hitter_name, pitcher_id, pitches }),
+                });
+
+                loading.classList.remove('active');
+                const data = await res.json();
+
+                if (!res.ok) {
+                    displayError('result_atbat', data.error || 'At-bat simulation failed');
+                    return;
+                }
+
+                let html = `<div class="result"><table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Type</th>
+                            <th>Speed</th>
+                            <th>Location</th>
+                            <th>xwOBA</th>
+                            <th>Interpretation</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                for (const p of data.pitches) {
+                    const xw_color = xwobaColor(p.xwoba);
+                    html += `
+                        <tr>
+                            <td>${p.pitch_num}</td>
+                            <td>${p.pitch_type}</td>
+                            <td>${p.speed} mph</td>
+                            <td>${p.location}</td>
+                            <td><span style="color: ${xw_color}; font-weight: bold;">${p.xwoba.toFixed(3)}</span></td>
+                            <td>${p.interpretation}</td>
+                        </tr>
+                    `;
+                }
+
+                html += `</tbody></table></div>`;
+
+                html += `
+                    <div class="at-bat-summary">
+                        <p>Avg xwOBA: <strong>${data.avg_xwoba.toFixed(4)}</strong></p>
+                        <p>Best pitch: <strong>#${data.best_pitch.num} ${data.best_pitch.type} (${data.best_pitch.xwoba.toFixed(4)})</strong></p>
+                        <p>Worst pitch: <strong>#${data.worst_pitch.num} ${data.worst_pitch.type} (${data.worst_pitch.xwoba.toFixed(4)})</strong></p>
+                        <p style="margin-top: 10px; border-top: 1px solid #30363d; padding-top: 10px;">
+                            <strong>${data.verdict}</strong>
+                        </p>
+                    </div>
+                `;
+
+                document.getElementById('result_atbat').innerHTML = html;
+            } catch (e) {
+                loading.classList.remove('active');
+                displayError('result_atbat', e.message);
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Batch Prediction
+        // ────────────────────────────────────────────────────────────────────────
+
+        async function predictBatch() {
+            const hitter_name = document.getElementById('hitter_batch').value;
+            const pitcher_id = document.getElementById('pitcher_batch').value || null;
+            const raw_data = document.getElementById('batch_data').value.trim();
+
+            if (!raw_data) {
+                displayError('result_batch', 'Enter pitch data');
+                return;
+            }
+
+            // Parse CSV or JSON
+            const pitches = [];
+            const lines = raw_data.split('\n').filter(l => l.trim());
+
+            for (const line of lines) {
+                try {
+                    if (line.startsWith('{')) {
+                        pitches.push(JSON.parse(line));
+                    } else {
+                        const [pt, rs, px, pz] = line.split(',').map(s => s.trim());
+                        pitches.push({
+                            pitch_type: pt,
+                            release_speed: parseFloat(rs),
+                            plate_x: parseFloat(px),
+                            plate_z: parseFloat(pz),
+                        });
+                    }
+                } catch (e) {
+                    displayError('result_batch', `Error parsing line: ${line}`);
+                    return;
+                }
+            }
+
+            const loading = document.getElementById('loading_batch');
+            loading.textContent = `Running predictions on ${pitches.length} pitches...`;
+            loading.classList.add('active');
+
+            try {
+                const res = await fetch('/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hitter_name, pitcher_id, pitches }),
+                });
+
+                loading.classList.remove('active');
+                const data = await res.json();
+
+                if (!res.ok) {
+                    displayError('result_batch', data.error || 'Batch prediction failed');
+                    return;
+                }
+
+                let html = `<div class="result"><table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Type</th>
+                            <th>Speed</th>
+                            <th>Plate X</th>
+                            <th>Plate Z</th>
+                            <th>xwOBA</th>
+                            <th>Quality</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                for (const p of data.predictions) {
+                    const xw_color = p.quality_color || xwobaColor(p.xwoba);
+                    html += `
+                        <tr>
+                            <td>${p.pitch_num}</td>
+                            <td>${p.pitch_type}</td>
+                            <td>${p.speed} mph</td>
+                            <td>${p.plate_x.toFixed(2)}</td>
+                            <td>${p.plate_z.toFixed(2)}</td>
+                            <td><span style="color: ${xw_color}; font-weight: bold;">${p.xwoba.toFixed(4)}</span></td>
+                            <td style="font-size: 0.8em; color: ${xw_color};">${p.interpretation}</td>
+                        </tr>
+                    `;
+                }
+
+                html += `</tbody></table></div>`;
+
+                html += `
+                    <div class="at-bat-summary">
+                        <p>Pitches analyzed: <strong>${data.summary.n_pitches}</strong></p>
+                        <p>Mean xwOBA: <strong>${data.summary.mean_xwoba.toFixed(4)}</strong></p>
+                        <p>Range: <strong>${data.summary.min_xwoba.toFixed(4)}</strong> to <strong>${data.summary.max_xwoba.toFixed(4)}</strong></p>
+                    </div>
+                `;
+
+                document.getElementById('result_batch').innerHTML = html;
+            } catch (e) {
+                loading.classList.remove('active');
+                displayError('result_batch', e.message);
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Hitter Game Log (Mode 4)
+        // ────────────────────────────────────────────────────────────────────────
+
+        let _glData = null;  // cache for filter updates
+
+        async function runGameLog() {
+            const fileInput = document.getElementById('gl_file');
+            const textInput = document.getElementById('gl_csv_text').value.trim();
+            let csvText = '';
+
+            if (fileInput.files.length > 0) {
+                csvText = await fileInput.files[0].text();
+            } else if (textInput) {
+                csvText = textInput;
+            } else {
+                displayError('result_gamelog', 'Upload a CSV file or paste CSV text');
+                return;
+            }
+
+            const loading = document.getElementById('loading_gamelog');
+            loading.textContent = 'Processing game log... this may take a moment.';
+            loading.classList.add('active');
+
+            try {
+                const res = await fetch('/game_log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ csv: csvText }),
+                });
+
+                loading.classList.remove('active');
+                const data = await res.json();
+
+                if (!res.ok) {
+                    displayError('result_gamelog', data.error || 'Game log evaluation failed');
+                    return;
+                }
+
+                _glData = data;
+                renderGameLog(data);
+            } catch (e) {
+                loading.classList.remove('active');
+                displayError('result_gamelog', e.message);
+            }
+        }
+
+        function renderGameLog(data) {
+            const s = data.summary;
+            let html = '';
+
+            // ── Summary cards ──
+            const consistentBadge = s.consistent
+                ? '<span style="color:#3fb950;">Directionally consistent</span>'
+                : '<span style="color:#d29922;">Check outcome ordering</span>';
+
+            html += `<div class="summary-grid">
+                <div class="summary-card"><div class="val">${s.hitter}</div><div class="lbl">Hitter (ID: ${s.batter_id})</div></div>
+                <div class="summary-card"><div class="val">${s.n_pitches}</div><div class="lbl">Pitches</div></div>
+                <div class="summary-card"><div class="val">${s.n_pas}</div><div class="lbl">Plate Appearances</div></div>
+                <div class="summary-card"><div class="val">${s.mean_xwoba_pred.toFixed(4)}</div><div class="lbl">Mean Predicted xwOBA</div></div>
+                ${s.mean_xwoba_actual != null ? `<div class="summary-card"><div class="val">${s.mean_xwoba_actual.toFixed(4)}</div><div class="lbl">Mean Actual xwOBA</div></div>` : ''}
+                <div class="summary-card"><div class="val">${consistentBadge}</div><div class="lbl">Sanity Check</div></div>
+            </div>`;
+
+            // ── Full-session strike zone SVG ──
+            const allPitches = [];
+            const pitchTypes = new Set();
+            const outcomes = new Set();
+            for (const ab of data.at_bats) {
+                for (const p of ab.pitches) {
+                    allPitches.push(p);
+                    pitchTypes.add(p.pitch_type);
+                    if (p.description) outcomes.add(p.description);
+                }
+            }
+
+            html += `<div class="panel" style="margin-top:15px;">
+                <h2>Full Session Strike Zone</h2>
+                <div class="filter-row" id="gl_filters">
+                    <span style="color:#8b949e;font-size:0.82em;margin-right:8px;">Pitch Type:</span>`;
+            for (const pt of [...pitchTypes].sort()) {
+                html += `<label><input type="checkbox" value="${pt}" class="gl-filter-pt" checked onchange="updateZoneFilters()"> ${pt}</label>`;
+            }
+            html += `<span style="color:#8b949e;font-size:0.82em;margin-left:16px;margin-right:8px;">Outcome:</span>`;
+            const outcomeOrder = ['swinging_strike', 'called_strike', 'foul', 'ball', 'hit_into_play', 'blocked_ball', 'foul_tip', 'swinging_strike_blocked', 'hit_by_pitch'];
+            const sortedOutcomes = [...outcomes].sort((a, b) => {
+                const ai = outcomeOrder.indexOf(a), bi = outcomeOrder.indexOf(b);
+                return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+            });
+            for (const oc of sortedOutcomes) {
+                html += `<label><input type="checkbox" value="${oc}" class="gl-filter-oc" checked onchange="updateZoneFilters()"> ${oc.replace(/_/g,' ')}</label>`;
+            }
+            html += `</div>
+                <div id="gl_zone_svg">${buildZoneSvg(allPitches, 500, {showNumbers: false})}</div>
+            </div>`;
+
+            // ── Outcome breakdown table ──
+            html += `<div class="panel" style="margin-top:15px;">
+                <h2>Outcome Breakdown (Key Validation)</h2>
+                <p style="color:#8b949e;font-size:0.82em;margin-bottom:10px;">
+                    If the model works, swinging_strike should have the lowest mean xwOBA, hit_into_play the highest.
+                </p>
+                <table class="breakdown-table">
+                    <thead><tr><th>Pitch Result</th><th>Count</th><th>Mean xwOBA</th><th>Min</th><th>Max</th><th></th></tr></thead>
+                    <tbody>`;
+            for (const ob of data.outcome_breakdown) {
+                const barWidth = Math.min(ob.mean_xwoba * 500, 100);
+                const barColor = xwobaColor(ob.mean_xwoba);
+                html += `<tr>
+                    <td>${ob.description.replace(/_/g, ' ')}</td>
+                    <td>${ob.count}</td>
+                    <td><span style="color:${barColor};font-weight:bold;">${ob.mean_xwoba.toFixed(4)}</span></td>
+                    <td>${ob.min_xwoba.toFixed(4)}</td>
+                    <td>${ob.max_xwoba.toFixed(4)}</td>
+                    <td><div style="background:${barColor};height:12px;width:${barWidth}px;border-radius:2px;opacity:0.7;"></div></td>
+                </tr>`;
+            }
+            html += `</tbody></table></div>`;
+
+            // ── Pitch type breakdown ──
+            html += `<div class="panel" style="margin-top:15px;">
+                <h2>Pitch Type Breakdown</h2>
+                <table class="breakdown-table">
+                    <thead><tr><th>Pitch Type</th><th>Count</th><th>Mean xwOBA</th><th></th></tr></thead>
+                    <tbody>`;
+            for (const pt of data.pitch_type_breakdown) {
+                const barWidth = Math.min(pt.mean_xwoba * 500, 100);
+                const barColor = xwobaColor(pt.mean_xwoba);
+                html += `<tr>
+                    <td>${pt.pitch_type}</td>
+                    <td>${pt.count}</td>
+                    <td><span style="color:${barColor};font-weight:bold;">${pt.mean_xwoba.toFixed(4)}</span></td>
+                    <td><div style="background:${barColor};height:12px;width:${barWidth}px;border-radius:2px;opacity:0.7;"></div></td>
+                </tr>`;
+            }
+            html += `</tbody></table></div>`;
+
+            // ── Plate appearances (expandable) ──
+            html += `<div class="panel" style="margin-top:15px;">
+                <h2>Plate Appearances (${data.at_bats.length})</h2>
+                <table>
+                    <thead><tr>
+                        <th></th><th>PA#</th><th>Pitcher</th><th>Pitches</th><th>Event</th><th>Avg xwOBA</th><th>wOBA</th>
+                    </tr></thead>
+                    <tbody>`;
+
+            for (let i = 0; i < data.at_bats.length; i++) {
+                const ab = data.at_bats[i];
+                const avgColor = xwobaColor(ab.avg_xwoba_pred);
+
+                html += `<tr class="gl-pa-row" onclick="togglePA(${i})">
+                    <td style="color:#484f58;">&#9654;</td>
+                    <td>${ab.at_bat_number}</td>
+                    <td style="font-size:0.82em;">${ab.pitcher_name || 'ID:' + ab.pitcher_id}</td>
+                    <td>${ab.n_pitches}</td>
+                    <td>${ab.event ? ab.event.replace(/_/g, ' ') : '-'}</td>
+                    <td><span style="color:${avgColor};font-weight:bold;">${ab.avg_xwoba_pred.toFixed(4)}</span></td>
+                    <td>${ab.woba_value != null ? ab.woba_value.toFixed(3) : '-'}</td>
+                </tr>`;
+
+                // Expandable detail row
+                html += `<tr class="gl-pa-detail" id="pa_detail_${i}"><td colspan="7">
+                    <div class="pa-row-with-zone">
+                        <div class="pa-pitch-table-wrap">
+                            <table class="gl-inner-table">
+                                <thead><tr>
+                                    <th>#</th><th>Type</th><th>Speed</th><th>Count</th><th>Location</th><th>xwOBA</th><th>Quality</th><th>Result</th>
+                                </tr></thead>
+                                <tbody>`;
+
+                for (const p of ab.pitches) {
+                    const pc = p.quality_color || xwobaColor(p.xwoba_pred);
+                    html += `<tr>
+                        <td>${p.pitch_num}</td>
+                        <td>${p.pitch_type}</td>
+                        <td>${p.speed} mph</td>
+                        <td>${p.count}</td>
+                        <td>(${p.plate_x}, ${p.plate_z})</td>
+                        <td><span style="color:${pc};font-weight:bold;">${p.xwoba_pred.toFixed(4)}</span></td>
+                        <td style="color:${pc};font-size:0.82em;">${p.quality}</td>
+                        <td style="font-size:0.82em;">${p.description.replace(/_/g,' ')}${p.event ? ' [' + p.event.replace(/_/g,' ') + ']' : ''}</td>
+                    </tr>`;
+                }
+
+                html += `</tbody></table></div>
+                        <div>${buildZoneSvg(ab.pitches, 250, {showNumbers: true})}</div>
+                    </div>
+                </td></tr>`;
+            }
+
+            html += `</tbody></table></div>`;
+
+            document.getElementById('result_gamelog').innerHTML = html;
+        }
+
+        function togglePA(idx) {
+            const el = document.getElementById(`pa_detail_${idx}`);
+            el.classList.toggle('open');
+            // Toggle arrow
+            const row = el.previousElementSibling;
+            const arrow = row.querySelector('td');
+            arrow.innerHTML = el.classList.contains('open') ? '&#9660;' : '&#9654;';
+        }
+
+        function updateZoneFilters() {
+            if (!_glData) return;
+
+            const ptCheckboxes = document.querySelectorAll('.gl-filter-pt');
+            const ocCheckboxes = document.querySelectorAll('.gl-filter-oc');
+
+            const ptFilter = new Set();
+            ptCheckboxes.forEach(cb => { if (cb.checked) ptFilter.add(cb.value); });
+
+            const ocFilter = new Set();
+            ocCheckboxes.forEach(cb => { if (cb.checked) ocFilter.add(cb.value); });
+
+            // Rebuild all pitches
+            const allPitches = [];
+            for (const ab of _glData.at_bats) {
+                for (const p of ab.pitches) allPitches.push(p);
+            }
+
+            const svgHtml = buildZoneSvg(allPitches, 500, {
+                showNumbers: false,
+                filters: { pitchTypes: ptFilter, outcomes: ocFilter }
+            });
+            document.getElementById('gl_zone_svg').innerHTML = svgHtml;
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Utilities
+        // ────────────────────────────────────────────────────────────────────────
+
+        function displayError(elemId, msg) {
+            document.getElementById(elemId).innerHTML = `<div class="error">${msg}</div>`;
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Initialization
+        // ────────────────────────────────────────────────────────────────────────
+
+        window.addEventListener('load', () => {
+            loadHitters();
+            loadPitchers();
+            addPitch();
+        });
+    </script>
+</body>
+</html>

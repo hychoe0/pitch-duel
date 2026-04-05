@@ -56,6 +56,11 @@ PREV_RESULT_MAP = {
 
 HIT_EVENTS = {"single", "double", "triple", "home_run"}
 
+# Universal DH started 2022 — pitcher-batting filter only applies before this
+DH_ERA_START = pd.Timestamp("2022-01-01")
+# Fraction of (pitcher + batter) appearances that must be as pitcher to be flagged
+PITCHER_BATTER_PCT_THRESHOLD = 0.80
+
 # Era flag encoding — reflects spin rate integrity and rule changes
 ERA_FLAG_MAP = {
     "pre_crackdown": 0,   # before Jun 21 2021 — Spider Tack era
@@ -170,6 +175,59 @@ ALL_FEATURES = (
 
 
 # ---------------------------------------------------------------------------
+# Pitcher-batter identification and removal
+# ---------------------------------------------------------------------------
+
+def identify_pitcher_batters(
+    df: pd.DataFrame,
+    pct_threshold: float = PITCHER_BATTER_PCT_THRESHOLD,
+) -> frozenset:
+    """
+    Return a frozenset of MLBAM player IDs who are primarily pitchers.
+
+    A player is flagged if ≥pct_threshold of their combined (as pitcher +
+    as batter) row appearances in pre-2022 data are in the pitcher column.
+    Only examines pre-2022 rows because universal DH started in 2022.
+    """
+    pre_dh = df[df["game_date"] < DH_ERA_START]
+    as_pitcher = pre_dh.groupby("pitcher").size().rename("n_pitcher")
+    as_batter  = pre_dh.groupby("batter").size().rename("n_batter")
+    combined = (
+        pd.DataFrame({"n_pitcher": as_pitcher, "n_batter": as_batter})
+        .fillna(0)
+    )
+    combined["pct_pitcher"] = combined["n_pitcher"] / (combined["n_pitcher"] + combined["n_batter"])
+    flagged = combined[
+        (combined["pct_pitcher"] >= pct_threshold) & (combined["n_batter"] > 0)
+    ]
+    return frozenset(flagged.index.astype(int))
+
+
+def drop_pitcher_batting_rows(
+    df: pd.DataFrame,
+    pitcher_batter_ids: frozenset,
+) -> pd.DataFrame:
+    """
+    Remove pre-2022 rows where the batter is a flagged pitcher-batter.
+    Post-2022 rows are never touched (universal DH — everyone batting is a real hitter).
+    """
+    before = len(df)
+    mask = (df["game_date"] < DH_ERA_START) & (df["batter"].isin(pitcher_batter_ids))
+    n_removed = int(mask.sum())
+    df = df[~mask].reset_index(drop=True)
+    pct = n_removed / before * 100
+    print(
+        f"Pitcher-batting rows removed: {n_removed:,} "
+        f"({pct:.2f}% of {before:,} rows)"
+    )
+    print(
+        f"  Flagged {len(pitcher_batter_ids):,} pitcher-batters "
+        f"(≥{PITCHER_BATTER_PCT_THRESHOLD:.0%} of pre-2022 appearances as pitcher)"
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Cleaning
 # ---------------------------------------------------------------------------
 
@@ -187,7 +245,12 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["plate_x"].notna() & df["plate_z"].notna()]
     df = df.drop_duplicates(subset=["game_pk", "at_bat_number", "pitch_number"])
 
-    print(f"Cleaned: {before:,} → {len(df):,} rows (2020 excluded)")
+    # Remove pitcher-batting PAs (pre-2022 NL only). Identify from this slice of data
+    # before any rows are lost, so the fraction calculation is stable.
+    pitcher_batter_ids = identify_pitcher_batters(df)
+    df = drop_pitcher_batting_rows(df, pitcher_batter_ids)
+
+    print(f"Cleaned: {before:,} → {len(df):,} rows")
     return df.reset_index(drop=True)
 
 
@@ -379,10 +442,9 @@ def save_processed(df: pd.DataFrame, train: pd.DataFrame, test: pd.DataFrame) ->
 
 def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     """
-    End-to-end preprocessing.
+    End-to-end preprocessing, including hitter profile building and merging.
     Returns (full_df, train_df, test_df).
-    Hitter profile features are NOT merged here — that happens in profiles.py
-    after per-hitter profiles are built.
+    Pipeline: clean → pitch features → pitcher features → hitter profiles → split & save
     """
     df = clean(raw_df)
     df = make_prev_pitch_features(df)
@@ -417,6 +479,11 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     # Fill any unmatched pitchers with population medians
     for col in PITCHER_FEATURES:
         df[col] = df[col].fillna(pitcher_df[col].median())
+
+    # Hitter identity features — build/merge all hitter profiles from pre-cutoff data
+    print("Building and merging hitter profiles...")
+    from src.hitters.profiles import merge_profiles_into_df
+    df = merge_profiles_into_df(df)
 
     train, test = split_data(df)
     save_processed(df, train, test)

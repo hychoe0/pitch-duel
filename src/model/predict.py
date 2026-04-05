@@ -71,17 +71,31 @@ _cache: dict = {}
 
 def load_model(model_dir: Path = MODEL_DIR) -> tuple:
     """
-    Load and cache (model, feature_cols, encodings, calibrator).
+    Load and cache (model, feature_cols, encodings, calibrator, is_classifier).
+    Auto-detects regressor vs classifier from the model's objective function.
     Uses XGBoost native JSON format for version safety.
     """
     if _cache:
-        return _cache["model"], _cache["feature_cols"], _cache["encodings"], _cache["calibrator"]
+        return (_cache["model"], _cache["feature_cols"], _cache["encodings"],
+                _cache["calibrator"], _cache["is_classifier"])
 
     model_path = model_dir / "pitch_duel_xgb.json"
     if not model_path.exists():
         raise FileNotFoundError(f"No trained model at {model_path}. Run train.py first.")
 
-    model = xgb.XGBRegressor()
+    # Load as Booster first to read objective without assuming wrapper type
+    booster = xgb.Booster()
+    booster.load_model(str(model_path))
+    objective = booster.attr("objective") or ""
+
+    _CLASSIFIER_OBJECTIVES = {"binary:logistic", "binary:hinge",
+                               "multi:softmax", "multi:softprob"}
+    is_classifier = objective in _CLASSIFIER_OBJECTIVES
+
+    if is_classifier:
+        model = xgb.XGBClassifier()
+    else:
+        model = xgb.XGBRegressor()
     model.load_model(str(model_path))
 
     with open(model_dir / "feature_cols.json") as f:
@@ -94,8 +108,9 @@ def load_model(model_dir: Path = MODEL_DIR) -> tuple:
     calibrator = joblib.load(calibrator_path) if calibrator_path.exists() else None
 
     _cache.update({"model": model, "feature_cols": feature_cols,
-                   "encodings": encodings, "calibrator": calibrator})
-    return model, feature_cols, encodings, calibrator
+                   "encodings": encodings, "calibrator": calibrator,
+                   "is_classifier": is_classifier})
+    return model, feature_cols, encodings, calibrator, is_classifier
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +286,10 @@ def predict_hit_probability(
     """
     Predict xwOBA for a single pitch against a named hitter.
 
+    Model type is detected automatically:
+    - XGBRegressor  → model.predict() returns xwOBA directly
+    - XGBClassifier → model.predict_proba()[:, 1] returns hit probability
+
     Args:
         pitch: dict with all raw pitch keys (see REQUIRED_RAW_KEYS)
         hitter_name: player name string (e.g. "Shohei Ohtani")
@@ -280,9 +299,10 @@ def predict_hit_probability(
 
     Returns:
         {
-            'xwoba_prediction': float,       # calibrated xwOBA (0.0–2.0 approx)
-            'xwoba_prediction_raw': float,   # uncalibrated regressor output
-            'hit_probability': float,        # binarized: 1.0 if xwoba > 0.15 else 0.0
+            'xwoba_prediction': float,       # calibrated xwOBA (regressor) or hit prob (classifier)
+            'xwoba_prediction_raw': float,   # uncalibrated output
+            'hit_probability': float,        # binarized: 1.0 if xwoba_prediction > 0.15 else 0.0
+            'model_type': str,               # 'regressor' or 'classifier'
             'hitter': str,
             'pitch_type': str,
             'count': str,                    # e.g. "1-2"
@@ -291,20 +311,36 @@ def predict_hit_probability(
         }
     """
     validate_pitch_dict(pitch)
-    model, feature_cols, encodings, calibrator = load_model(model_dir)
+    model, feature_cols, encodings, calibrator, is_classifier = load_model(model_dir)
+
     hitter_features, is_thin, used_fallback = _resolve_hitter_profile(hitter_name)
+
+    # Load pitcher aggregate features (5 columns: release height, horizontal position,
+    # extension, avg fastball speed, arm-slot angle). Falls back to population medians
+    # when pitcher_id is None or unknown — ensures the feature vector is always complete.
     pitcher_features = _resolve_pitcher_features(pitcher_id)
-    # Merge hitter + pitcher features; pitcher features fill the 5 PITCHER_FEATURES slots
+
+    # Merge hitter + pitcher features; build_feature_row adds encoded pitch features
     combined_features = {**hitter_features, **pitcher_features}
     row = build_feature_row(pitch, combined_features, feature_cols, encodings)
-    raw_xwoba = float(max(0.0, model.predict(row)[0]))
-    cal_xwoba = float(calibrator.predict([raw_xwoba])[0]) if calibrator is not None else raw_xwoba
-    cal_xwoba = max(0.0, cal_xwoba)
+
+    # Predict using the detected model type
+    if is_classifier:
+        raw_output = float(model.predict_proba(row)[0, 1])
+    else:
+        raw_output = float(max(0.0, model.predict(row)[0]))
+
+    if calibrator is not None:
+        cal_output = float(calibrator.predict([raw_output])[0])
+    else:
+        cal_output = raw_output
+    cal_output = max(0.0, cal_output)
 
     return {
-        "xwoba_prediction":     round(cal_xwoba, 4),
-        "xwoba_prediction_raw": round(raw_xwoba, 4),
-        "hit_probability":      1.0 if cal_xwoba > 0.15 else 0.0,
+        "xwoba_prediction":     round(cal_output, 4),
+        "xwoba_prediction_raw": round(raw_output, 4),
+        "hit_probability":      1.0 if cal_output > 0.15 else 0.0,
+        "model_type":           "classifier" if is_classifier else "regressor",
         "hitter": hitter_name,
         "pitch_type": pitch["pitch_type"],
         "count": f"{pitch['balls']}-{pitch['strikes']}",
@@ -317,42 +353,101 @@ def predict_hit_probability(
 # CLI demo
 # ---------------------------------------------------------------------------
 
+def _find_weakest_hitter(profile_dir: Path) -> str:
+    """
+    Scan all saved profiles and return the player name with the lowest
+    hard_hit_rate among profiles with at least 500 sample pitches.
+    Excludes profiles flagged as thin (blended with league averages).
+    """
+    import json as _json
+
+    best_name = None
+    best_rate = float("inf")
+
+    for path in profile_dir.glob("*.json"):
+        try:
+            with open(path) as f:
+                data = _json.load(f)
+        except Exception:
+            continue
+        if data.get("is_thin_sample", True):
+            continue
+        if data.get("sample_size", 0) < 500:
+            continue
+        rate = data.get("hard_hit_rate", float("inf"))
+        if rate < best_rate:
+            best_rate = rate
+            best_name = data.get("player_name", "")
+
+    return best_name or "league average"
+
+
+def _print_result(label: str, result: dict) -> None:
+    model_tag = f"[{result['model_type']}]" if result.get("model_type") else ""
+    xw = result["xwoba_prediction"]
+    note = ""
+    if result.get("used_fallback"):
+        note = "  ⚠ league-average profile"
+    elif result.get("is_thin_sample"):
+        note = "  ⚠ thin sample (blended)"
+    print(f"  {label}")
+    print(f"    xwOBA: {xw:.4f}  {model_tag}{note}")
+    print(f"    Pitch: {result['pitch_type']}  Count: {result['count']}")
+
+
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Predict hit probability for a sample pitch")
-    parser.add_argument("--hitter", type=str, default="Shohei Ohtani")
-    args = parser.parse_args()
-
-    sample_pitch = {
-        "release_speed": 95.2,
+    _BASE = {
         "release_spin_rate": 2350.0,
-        "pfx_x": -0.5,
-        "pfx_z": 1.2,
-        "release_pos_x": -1.8,
-        "release_pos_z": 6.1,
-        "release_extension": 6.5,
-        "plate_x": 0.1,
-        "plate_z": 2.8,
-        "pitch_type": "FF",
-        "balls": 1,
-        "strikes": 2,
-        "pitch_number": 4,
-        "prev_pitch_type": "SL",
-        "prev_pitch_speed": 88.0,
-        "prev_pitch_result": "swinging_strike",
-        "on_1b": None,
-        "on_2b": None,
-        "on_3b": None,
-        "inning": 7,
-        "score_diff": -1,
-        "p_throws": "R",
+        "pfx_x":             -0.4,
+        "pfx_z":              1.1,
+        "release_pos_x":     -1.8,
+        "release_pos_z":      6.1,
+        "release_extension":  6.5,
+        "plate_x":            0.0,
+        "plate_z":            2.5,
+        "pitch_number":       1,
+        "prev_pitch_type":   "FIRST_PITCH",
+        "prev_pitch_speed":   0.0,
+        "prev_pitch_result": "FIRST_PITCH",
+        "on_1b":  None,
+        "on_2b":  None,
+        "on_3b":  None,
+        "inning":     1,
+        "score_diff": 0,
+        "p_throws":  "R",
+        "game_date": "2024-06-15",
     }
 
-    result = predict_hit_probability(sample_pitch, args.hitter)
-    print(f"\nxwOBA prediction for {result['hitter']}: {result['xwoba_prediction']:.4f}")
-    print(f"  Pitch: {result['pitch_type']}  |  Count: {result['count']}")
-    if result["used_fallback"]:
-        print("  (league-average profile used — hitter not in database)")
-    elif result["is_thin_sample"]:
-        print("  (thin sample — profile blended with league averages)")
+    print("=" * 50)
+    print("PITCH DUEL — predict.py sanity demo")
+    print("=" * 50)
+
+    # Load model once and print type
+    _, _, _, _, is_clf = load_model()
+    mtype = "XGBClassifier (predict_proba)" if is_clf else "XGBRegressor (predict)"
+    print(f"  Model detected: {mtype}\n")
+
+    # 1. 95 mph FF to Ohtani, 1-2 count
+    p1 = {**_BASE, "release_speed": 95.0, "pitch_type": "FF",
+          "balls": 1, "strikes": 2, "pitch_number": 3,
+          "prev_pitch_type": "FF", "prev_pitch_speed": 94.0,
+          "prev_pitch_result": "called_strike"}
+    r1 = predict_hit_probability(p1, "Shohei Ohtani")
+    _print_result("95 mph FF vs Ohtani — 1-2 count", r1)
+
+    # 2. 85 mph CU to Ohtani, 0-0 count
+    p2 = {**_BASE, "release_speed": 85.0, "pitch_type": "CU",
+          "pfx_z": -0.5,   # downward break on a curve
+          "plate_z": 2.0,  # low in zone
+          "balls": 0, "strikes": 0}
+    r2 = predict_hit_probability(p2, "Shohei Ohtani")
+    _print_result("85 mph CU vs Ohtani — 0-0 count", r2)
+
+    # 3. 95 mph FF to the weakest hitter in profiles, 1-2 count
+    weakest = _find_weakest_hitter(PROFILE_DIR)
+    r3 = predict_hit_probability(p1, weakest)
+    _print_result(f"95 mph FF vs {weakest} (weakest by hard-hit rate) — 1-2 count", r3)
+
+    print()
+    spread = abs(r1["xwoba_prediction"] - r3["xwoba_prediction"])
+    print(f"  Ohtani vs weakest spread: {spread:.4f}")

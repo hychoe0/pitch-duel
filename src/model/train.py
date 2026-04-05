@@ -252,6 +252,16 @@ def save_model(
 # ---------------------------------------------------------------------------
 
 def run_training() -> xgb.XGBRegressor:
+    # Preprocess if necessary
+    path = PROCESSED_DIR / "statcast_processed.parquet"
+    if not path.exists():
+        print("Statcast data not preprocessed. Running preprocess.py...")
+        from src.data.preprocess import run_preprocessing
+        from src.data.fetch import load_raw
+        raw = load_raw()
+        run_preprocessing(raw)
+        print()
+
     train_df, test_df = load_training_data()
 
     # Use 2024 season as early-stopping validation set within training
