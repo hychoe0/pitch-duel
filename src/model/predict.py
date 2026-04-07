@@ -170,6 +170,8 @@ def encode_pitch_dict(pitch: dict, encodings: dict) -> dict:
     encoded["on_1b_flag"] = int(bool(pitch.get("on_1b")))
     encoded["on_2b_flag"] = int(bool(pitch.get("on_2b")))
     encoded["on_3b_flag"] = int(bool(pitch.get("on_3b")))
+    # Default to 1st time through the order; callers can pass times_through_order to override.
+    encoded["times_through_order"] = int(pitch.get("times_through_order", 1))
 
     release_speed     = pitch["release_speed"]
     release_spin_rate = pitch.get("release_spin_rate", 0) or 0
@@ -466,7 +468,12 @@ def predict_pitch(
     def _calibrated(model, cal, row):
         raw = float(model.predict_proba(row)[0, 1])
         val = float(cal.predict([raw])[0]) if cal else raw
-        return float(np.clip(val, 0.0, 1.0))
+        # Cap at 0.97 to prevent calibration cliff-edge saturation.
+        # The isotonic calibrator has a step from ~0.832 to 1.0 with no
+        # examples between raw ≈ 0.89 and 1.0, causing many borderline
+        # cases to hard-saturate. 0.97 preserves the meaning (very likely)
+        # while keeping the output differentiable.
+        return float(np.clip(val, 0.0, 0.97))
 
     p_swing             = _calibrated(swing_model, swing_cal, row)
     p_contact_given_sw  = _calibrated(contact_model, contact_cal, row)

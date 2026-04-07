@@ -109,6 +109,7 @@ CONTEXT_FEATURES = [
     "on_3b_flag",
     "inning",
     "score_diff",
+    "times_through_order",
 ]
 
 HITTER_PROFILE_FEATURES = [
@@ -318,6 +319,47 @@ def make_score_diff(df: pd.DataFrame) -> pd.Series:
         df["away_score"] - df["home_score"],
         df["home_score"] - df["away_score"],
     )
+
+
+# ---------------------------------------------------------------------------
+# Times through the order
+# ---------------------------------------------------------------------------
+
+def make_times_through_order(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute how many times the batter has faced this pitcher in this game.
+
+    Groups by (game_pk, batter, pitcher). Within each group, each unique
+    at_bat_number represents one plate appearance. The first PA = 1, second = 2,
+    third+ = 3 (capped at 3 to avoid sparse high-TTO cells).
+
+    Stored as integer column "times_through_order".
+    """
+    # Rank each unique at_bat_number within the (game, batter, pitcher) group.
+    # We use at_bat_number directly — lower value = earlier in game.
+    ab_rank = (
+        df[["game_pk", "batter", "pitcher", "at_bat_number"]]
+        .drop_duplicates(subset=["game_pk", "batter", "pitcher", "at_bat_number"])
+        .copy()
+    )
+    ab_rank["tto"] = (
+        ab_rank.groupby(["game_pk", "batter", "pitcher"])["at_bat_number"]
+        .rank(method="dense")
+        .astype(int)
+        .clip(upper=3)
+    )
+
+    df = df.merge(
+        ab_rank[["game_pk", "batter", "pitcher", "at_bat_number", "tto"]],
+        on=["game_pk", "batter", "pitcher", "at_bat_number"],
+        how="left",
+    )
+    df["times_through_order"] = df["tto"].fillna(1).astype(int)
+    df.drop(columns=["tto"], inplace=True)
+
+    dist = df["times_through_order"].value_counts().sort_index()
+    print(f"times_through_order distribution: {dist.to_dict()}")
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +642,7 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     """
     df = clean(raw_df)
     df = make_prev_pitch_features(df)
+    df = make_times_through_order(df)
     df = impute_pitcher_medians(df)
 
     df["hit"] = make_target(df)
