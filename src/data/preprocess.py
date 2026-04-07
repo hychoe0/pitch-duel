@@ -163,6 +163,15 @@ PITCHER_FEATURES = [
     "pitcher_slot_angle",
 ]
 
+HITTER_CONTEXTUAL_FEATURES = [
+    # Resolved from each pitch's zone/family/count — replace routing logic XGBoost must learn
+    "hitter_swing_rate_this_zone",
+    "hitter_whiff_rate_this_zone",
+    "hitter_swing_rate_this_family",
+    "hitter_whiff_rate_this_family",
+    "hitter_swing_rate_this_count",
+]
+
 ALL_FEATURES = (
     PITCH_FEATURES
     + CONTEXT_FEATURES
@@ -170,8 +179,43 @@ ALL_FEATURES = (
     + HITTER_PITCH_TYPE_FEATURES
     + HITTER_ZONE_FEATURES
     + HITTER_FAMILY_FEATURES
-    + PITCHER_FEATURES
+    + HITTER_CONTEXTUAL_FEATURES
+    # PITCHER_FEATURES intentionally excluded — disconnected from model pipeline.
+    # Keep src/pitchers/features.py and the parquet file; re-add here to re-enable.
+    # + PITCHER_FEATURES
 )
+
+
+# ---------------------------------------------------------------------------
+# Three-stage behavioral target descriptions
+# ---------------------------------------------------------------------------
+
+SWING_DESCRIPTIONS = {
+    "swinging_strike",
+    "swinging_strike_blocked",
+    "foul",
+    "foul_tip",
+    "foul_bunt",
+    "missed_bunt",
+    "hit_into_play",
+    "hit_into_play_no_out",
+    "hit_into_play_score",
+}
+
+CONTACT_DESCRIPTIONS = {
+    "foul",
+    "foul_tip",
+    "foul_bunt",
+    "hit_into_play",
+    "hit_into_play_no_out",
+    "hit_into_play_score",
+}
+
+IN_PLAY_DESCRIPTIONS = {
+    "hit_into_play",
+    "hit_into_play_no_out",
+    "hit_into_play_score",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +481,113 @@ def save_processed(df: pd.DataFrame, train: pd.DataFrame, test: pd.DataFrame) ->
 
 
 # ---------------------------------------------------------------------------
+# Contextual hitter feature resolution
+# ---------------------------------------------------------------------------
+
+def add_contextual_hitter_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Resolve 5 per-pitch contextual hitter features from the matched zone,
+    pitch family, and count for each row.
+
+    Requires the static zone/family/count columns already merged from profiles:
+      - hitter_swing_rate_z{1-9,11-14}, hitter_whiff_rate_z{1-9,11-14}
+      - hitter_swing_rate_{fastball,breaking,offspeed,other}
+      - hitter_whiff_rate_{fastball,breaking,offspeed,other}
+      - hitter_swing_rate_count_{b}_{s}  (for b in 0-3, s in 0-2)
+
+    Output columns (appended):
+      hitter_swing_rate_this_zone
+      hitter_whiff_rate_this_zone
+      hitter_swing_rate_this_family
+      hitter_whiff_rate_this_family
+      hitter_swing_rate_this_count
+    """
+    from src.hitters.profiles import ALL_ZONES, PITCH_FAMILY_LIST, PITCH_FAMILIES
+
+    # Build pitch_type → family lookup
+    pitch_type_to_family = {}
+    for family, types in PITCH_FAMILIES.items():
+        for pt in types:
+            pitch_type_to_family[pt] = family
+
+    df = df.copy()
+
+    # ── Zone features ──
+    # Fallback: overall swing/whiff rate for rows with NaN zone
+    df["hitter_swing_rate_this_zone"] = df["hitter_swing_rate"].copy()
+    df["hitter_whiff_rate_this_zone"] = df["hitter_whiff_rate"].copy()
+
+    zone_col = df["zone"] if "zone" in df.columns else pd.Series(np.nan, index=df.index)
+    for z in ALL_ZONES:
+        mask = zone_col == z
+        if mask.any():
+            df.loc[mask, "hitter_swing_rate_this_zone"] = df.loc[mask, f"hitter_swing_rate_z{z}"]
+            df.loc[mask, "hitter_whiff_rate_this_zone"] = df.loc[mask, f"hitter_whiff_rate_z{z}"]
+
+    # ── Pitch-family features ──
+    df["_pitch_family"] = df["pitch_type"].map(pitch_type_to_family).fillna("other")
+    df["hitter_swing_rate_this_family"] = df["hitter_swing_rate"].copy()
+    df["hitter_whiff_rate_this_family"] = df["hitter_whiff_rate"].copy()
+
+    for fam in PITCH_FAMILY_LIST:
+        mask = df["_pitch_family"] == fam
+        if mask.any():
+            df.loc[mask, "hitter_swing_rate_this_family"] = df.loc[mask, f"hitter_swing_rate_{fam}"]
+            df.loc[mask, "hitter_whiff_rate_this_family"] = df.loc[mask, f"hitter_whiff_rate_{fam}"]
+    df.drop(columns=["_pitch_family"], inplace=True)
+
+    # ── Count feature ──
+    df["hitter_swing_rate_this_count"] = df["hitter_swing_rate"].copy()
+    for b in range(4):
+        for s in range(3):
+            mask = (df["balls"] == b) & (df["strikes"] == s)
+            if mask.any():
+                col = f"hitter_swing_rate_count_{b}_{s}"
+                if col in df.columns:
+                    df.loc[mask, "hitter_swing_rate_this_count"] = df.loc[mask, col]
+
+    n_zone_filled = (zone_col.notna()).sum()
+    n_total = len(df)
+    print(
+        f"Contextual hitter features resolved: "
+        f"{n_zone_filled:,}/{n_total:,} rows have zone data "
+        f"({n_zone_filled/n_total*100:.1f}%)"
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Three-stage behavioral target construction
+# ---------------------------------------------------------------------------
+
+def make_three_stage_targets(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add three binary target columns for three-stage hitter behavior modeling.
+
+    Stage 1 — target_swing:  did the hitter swing? (all pitches)
+    Stage 2 — target_contact: did they make contact? (meaningful on swings only)
+    Stage 3 — target_hard_contact: was it hard hit ≥ 95 mph? (meaningful on in-play only)
+
+    The existing 'hit' and 'xwoba' columns are preserved unchanged.
+    """
+    df["target_swing"] = df["description"].isin(SWING_DESCRIPTIONS).astype(int)
+    df["target_contact"] = df["description"].isin(CONTACT_DESCRIPTIONS).astype(int)
+    df["target_hard_contact"] = (
+        (df["launch_speed"].fillna(0) >= 95)
+        & df["description"].isin(IN_PLAY_DESCRIPTIONS)
+    ).astype(int)
+
+    swing_rate   = df["target_swing"].mean()
+    contact_rate = df[df["target_swing"] == 1]["target_contact"].mean()
+    hc_rate      = df[df["target_contact"] == 1]["target_hard_contact"].mean()
+    print(
+        f"Three-stage targets: swing={swing_rate:.3f}, "
+        f"contact|swing={contact_rate:.3f}, hard|contact={hc_rate:.3f}"
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Full pipeline
 # ---------------------------------------------------------------------------
 
@@ -444,7 +595,8 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     """
     End-to-end preprocessing, including hitter profile building and merging.
     Returns (full_df, train_df, test_df).
-    Pipeline: clean → pitch features → pitcher features → hitter profiles → split & save
+    Pipeline: clean → pitch features → three-stage targets → hitter profiles → split & save
+    Pitcher features are disconnected from the pipeline (commented out).
     """
     df = clean(raw_df)
     df = make_prev_pitch_features(df)
@@ -453,6 +605,9 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     df["hit"] = make_target(df)
     df["xwoba"] = df["estimated_woba_using_speedangle"].fillna(0.0)
     df["score_diff"] = make_score_diff(df)
+
+    # Three-stage behavioral targets (added after cleaning so description column is intact)
+    df = make_three_stage_targets(df)
 
     df = encode_pitch_types(df)
     df = encode_prev_result(df)
@@ -464,26 +619,30 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
     df["spin_to_velo_ratio"] = make_spin_to_velo_ratio(df)
     df["sample_weight"] = make_sample_weights(df)
 
-    # Pitcher identity features
-    from src.pitchers.features import (
-        PITCHER_FEATURES_PATH, build_pitcher_features, load_pitcher_features
-    )
-    if not PITCHER_FEATURES_PATH.exists():
-        print("Building pitcher features...")
-        pitcher_df = build_pitcher_features(df)
-    else:
-        pitcher_df = load_pitcher_features()
-    # Drop pre-existing pitcher feature columns to prevent _x/_y collisions on re-run
-    df = df.drop(columns=[c for c in PITCHER_FEATURES if c in df.columns])
-    df = df.merge(pitcher_df, on="pitcher", how="left")
-    # Fill any unmatched pitchers with population medians
-    for col in PITCHER_FEATURES:
-        df[col] = df[col].fillna(pitcher_df[col].median())
+    # Pitcher identity features — disconnected from model pipeline.
+    # src/pitchers/features.py and the parquet file are preserved.
+    # Uncomment this block to re-enable pitcher features in preprocessing.
+    # from src.pitchers.features import (
+    #     PITCHER_FEATURES_PATH, build_pitcher_features, load_pitcher_features
+    # )
+    # if not PITCHER_FEATURES_PATH.exists():
+    #     print("Building pitcher features...")
+    #     pitcher_df = build_pitcher_features(df)
+    # else:
+    #     pitcher_df = load_pitcher_features()
+    # df = df.drop(columns=[c for c in PITCHER_FEATURES if c in df.columns])
+    # df = df.merge(pitcher_df, on="pitcher", how="left")
+    # for col in PITCHER_FEATURES:
+    #     df[col] = df[col].fillna(pitcher_df[col].median())
 
     # Hitter identity features — build/merge all hitter profiles from pre-cutoff data
     print("Building and merging hitter profiles...")
     from src.hitters.profiles import merge_profiles_into_df
     df = merge_profiles_into_df(df)
+
+    # Contextual matched features: resolve zone/family/count for each pitch row
+    print("Resolving contextual hitter features...")
+    df = add_contextual_hitter_features(df)
 
     train, test = split_data(df)
     save_processed(df, train, test)

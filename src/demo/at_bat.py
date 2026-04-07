@@ -16,27 +16,48 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.model.predict import predict_hit_probability
+from src.model.predict import predict_pitch, interpret_pitch
+
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Interpretation helpers
+# Outcome simulation (count progression only — rough heuristic)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _interpret(xwoba: float) -> str:
-    if xwoba < 0.04:
-        return "Swing and miss territory"
-    if xwoba < 0.08:
-        return "Good pitch — hitter is uncomfortable"
-    if xwoba < 0.15:
-        return "Competitive — could go either way"
-    if xwoba < 0.25:
-        return "Hitter is sitting on this — danger zone"
-    return "Mistake pitch — hitter punishes this"
+def _simulate_outcome(
+    p_swing: float, p_contact_given_swing: float, balls: int, strikes: int
+) -> tuple:
+    """
+    Simulate a pitch outcome label and advance the count.
+    Returns (result_label, new_balls, new_strikes, at_bat_over).
+    """
+    if p_swing < 0.25:
+        # Hitter likely takes it
+        if strikes < 2:
+            return "called_strike", balls, strikes + 1, False
+        else:
+            return "ball", balls + 1, strikes, balls + 1 == 4
+    else:
+        # Hitter swings
+        if p_contact_given_swing < 0.40:
+            # Whiff
+            if strikes < 2:
+                return "swinging_strike", balls, strikes + 1, False
+            else:
+                return "swinging_strike", balls, 3, True  # strikeout
+        else:
+            # Contact made
+            if strikes < 2:
+                return "foul", balls, min(strikes + 1, 2), False
+            else:
+                return "hit_into_play", balls, 2, True
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Location tag helper
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _location_tag(plate_x: float, plate_z: float) -> str:
     """Human-readable zone label from catcher's perspective."""
-    # Vertical
     if plate_z > 3.2:
         vert = "elevated"
     elif plate_z > 2.6:
@@ -46,7 +67,6 @@ def _location_tag(plate_x: float, plate_z: float) -> str:
     else:
         vert = "below zone"
 
-    # Horizontal (from catcher's view: positive plate_x = arm side = right side of plate)
     if plate_x > 0.85:
         horiz = "off plate away"
     elif plate_x > 0.4:
@@ -64,35 +84,6 @@ def _location_tag(plate_x: float, plate_z: float) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Outcome simulation (rough — for count progression only)
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _simulate_outcome(xwoba: float, balls: int, strikes: int) -> tuple[str, int, int, bool]:
-    """
-    Return (result_label, new_balls, new_strikes, at_bat_over).
-    Thresholds differ by whether the hitter is already at 2 strikes.
-    """
-    if strikes < 2:
-        if xwoba < 0.05:
-            return "swinging_strike", balls, strikes + 1, False
-        elif xwoba < 0.10:
-            return "called_strike", balls, strikes + 1, False
-        elif xwoba < 0.18:
-            return "ball", balls + 1, strikes, balls + 1 == 4  # walk if 4th ball
-        else:
-            return "foul", balls, strikes + 1, False
-    else:  # strikes == 2
-        if xwoba < 0.05:
-            return "swinging_strike", balls, 3, True   # strikeout
-        elif xwoba < 0.10:
-            return "foul", balls, 2, False             # foul, count holds
-        elif xwoba < 0.18:
-            return "ball", balls + 1, 2, balls + 1 == 4  # walk if 4th ball
-        else:
-            return "hit_into_play", balls, 2, True     # contact, end at-bat
-
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Core simulator
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -107,9 +98,8 @@ _PITCH_DEFAULTS = {
 
 
 def simulate_at_bat(
-    pitcher_arsenal: list[dict],
+    pitcher_arsenal: list,
     hitter_name: str,
-    pitcher_id: int = None,
     p_throws: str = "R",
     on_1b=None,
     on_2b=None,
@@ -125,9 +115,8 @@ def simulate_at_bat(
         pitcher_arsenal: ordered list of pitch dicts, each containing at minimum:
             release_speed, pitch_type, plate_x, plate_z
             Optional: release_spin_rate, pfx_x, pfx_z, release_pos_x/z,
-                      release_extension (defaults filled from PITCH_DEFAULTS)
+                      release_extension (defaults filled from _PITCH_DEFAULTS)
         hitter_name:  player name string (e.g. "Shohei Ohtani")
-        pitcher_id:   MLBAM pitcher ID for feature lookup; None → medians
         p_throws:     pitcher handedness "R" or "L"
         on_1b/2b/3b:  baserunner flags (None = empty)
         inning:       current inning
@@ -137,9 +126,9 @@ def simulate_at_bat(
     Returns:
         {
           'pitches': list of per-pitch result dicts,
-          'avg_xwoba': float,
-          'best_pitch': dict,   # lowest xwOBA
-          'worst_pitch': dict,  # highest xwOBA
+          'avg_p_hard_contact': float,
+          'best_pitch': dict,   # lowest p_hard_contact
+          'worst_pitch': dict,  # highest p_hard_contact
           'verdict': str,
           'hitter': str,
           'final_count': str,
@@ -154,13 +143,14 @@ def simulate_at_bat(
 
     if verbose:
         print(f"  Hitter: {hitter_name}")
-        print(f"  {'#':<4} {'Count':<6} {'Type':<5} {'MPH':>5}  {'Location':<18} {'xwOBA':>7}  Interpretation")
-        print(f"  {'─'*4} {'─'*6} {'─'*5} {'─'*5}  {'─'*18} {'─'*7}  {'─'*35}")
+        print(f"  {'#':<4} {'Count':<6} {'Type':<5} {'MPH':>5}  {'Location':<18} "
+              f"{'P(sw)':>6} {'P(con)':>6} {'P(hrd)':>6}  Quality")
+        print(f"  {'─'*4} {'─'*6} {'─'*5} {'─'*5}  {'─'*18} "
+              f"{'─'*6} {'─'*6} {'─'*6}  {'─'*35}")
 
     for i, raw_pitch in enumerate(pitcher_arsenal):
         pitch_num = i + 1
 
-        # Fill defaults for missing mechanical features
         pitch = {**_PITCH_DEFAULTS, **raw_pitch}
         pitch.update({
             "balls":             balls,
@@ -178,40 +168,53 @@ def simulate_at_bat(
             "game_date":         date.today().isoformat(),
         })
 
-        result = predict_hit_probability(pitch, hitter_name, pitcher_id=pitcher_id)
-        xw = result["xwoba_prediction"]
+        result = predict_pitch(pitch, hitter_name)
+        p_swing            = result["p_swing"]
+        p_contact_given_sw = result["p_contact_given_swing"]
+        p_hard_given_con   = result["p_hard_given_contact"]
+        p_hard_contact     = result["p_hard_contact"]
 
         px = raw_pitch.get("plate_x", pitch["plate_x"])
         pz = raw_pitch.get("plate_z", pitch["plate_z"])
-        loc_tag  = _location_tag(px, pz)
-        interp   = _interpret(xw)
+        loc_tag   = _location_tag(px, pz)
+        quality   = result["pitch_quality"]
         count_str = f"{balls}-{strikes}"
 
         if verbose:
             print(
                 f"  {pitch_num:<4} {count_str:<6} "
                 f"{pitch['pitch_type']:<5} {pitch['release_speed']:>5.1f}  "
-                f"{loc_tag:<18} {xw:>7.3f}  {interp}"
+                f"{loc_tag:<18} "
+                f"{p_swing:>6.3f} {p_contact_given_sw:>6.3f} {p_hard_given_con:>6.3f}  "
+                f"{quality}"
             )
 
-        # Determine outcome and advance count
-        outcome, balls, strikes, ab_over = _simulate_outcome(xw, balls, strikes)
+        outcome, balls, strikes, ab_over = _simulate_outcome(
+            p_swing, p_contact_given_sw, balls, strikes
+        )
 
         prev_pitch_type   = pitch["pitch_type"]
         prev_pitch_speed  = pitch["release_speed"]
         prev_pitch_result = outcome
 
         pitch_results.append({
-            "pitch_num":    pitch_num,
-            "count_before": count_str,
-            "pitch_type":   pitch["pitch_type"],
-            "speed":        pitch["release_speed"],
-            "plate_x":      px,
-            "plate_z":      pz,
-            "location":     loc_tag,
-            "xwoba":        xw,
-            "outcome":      outcome,
-            "interpretation": interp,
+            "pitch_num":             pitch_num,
+            "count_before":          count_str,
+            "pitch_type":            pitch["pitch_type"],
+            "speed":                 pitch["release_speed"],
+            "plate_x":               px,
+            "plate_z":               pz,
+            "location":              loc_tag,
+            "p_swing":               p_swing,
+            "p_contact_given_swing": p_contact_given_sw,
+            "p_hard_given_contact":  p_hard_given_con,
+            "p_contact":             result["p_contact"],
+            "p_hard_contact":        p_hard_contact,
+            "outcome":               outcome,
+            "pitch_quality":         quality,
+            # legacy key for backward compat with server.py at-bat endpoint
+            "xwoba":                 p_hard_contact,
+            "interpretation":        quality,
         })
 
         if ab_over:
@@ -224,35 +227,38 @@ def simulate_at_bat(
                     print(f"  {'':4} {'':6} → Ball in play")
             break
 
-    avg_xw     = sum(p["xwoba"] for p in pitch_results) / len(pitch_results)
-    best_pitch = min(pitch_results, key=lambda p: p["xwoba"])
-    worst_pitch = max(pitch_results, key=lambda p: p["xwoba"])
+    avg_hard = sum(p["p_hard_contact"] for p in pitch_results) / len(pitch_results)
+    best_pitch  = min(pitch_results, key=lambda p: p["p_hard_contact"])
+    worst_pitch = max(pitch_results, key=lambda p: p["p_hard_contact"])
 
-    if avg_xw < 0.10:
-        verdict = f"This sequence kept {hitter_name} off balance"
-    else:
-        verdict = f"This sequence gave {hitter_name} too many good looks"
+    verdict = (
+        f"This sequence kept {hitter_name} off balance"
+        if avg_hard < 0.12
+        else f"This sequence gave {hitter_name} too many hard-contact looks"
+    )
 
     final_count = f"{balls}-{strikes}"
 
     if verbose:
-        print(f"\n  Average xwOBA: {avg_xw:.3f}")
+        print(f"\n  Avg P(hard_contact): {avg_hard:.3f}")
         print(f"  Best pitch:  #{best_pitch['pitch_num']} "
               f"{best_pitch['pitch_type']} {best_pitch['speed']:.0f} mph "
-              f"{best_pitch['location']} → {best_pitch['xwoba']:.3f}")
+              f"{best_pitch['location']} → P(hard)={best_pitch['p_hard_contact']:.3f}")
         print(f"  Worst pitch: #{worst_pitch['pitch_num']} "
               f"{worst_pitch['pitch_type']} {worst_pitch['speed']:.0f} mph "
-              f"{worst_pitch['location']} → {worst_pitch['xwoba']:.3f}")
+              f"{worst_pitch['location']} → P(hard)={worst_pitch['p_hard_contact']:.3f}")
         print(f"  Verdict: {verdict}")
 
     return {
-        "pitches":      pitch_results,
-        "avg_xwoba":    round(avg_xw, 4),
-        "best_pitch":   best_pitch,
-        "worst_pitch":  worst_pitch,
-        "verdict":      verdict,
-        "hitter":       hitter_name,
-        "final_count":  final_count,
+        "pitches":           pitch_results,
+        "avg_p_hard_contact": round(avg_hard, 4),
+        # legacy keys for server.py at-bat endpoint
+        "avg_xwoba":         round(avg_hard, 4),
+        "best_pitch":        best_pitch,
+        "worst_pitch":       worst_pitch,
+        "verdict":           verdict,
+        "hitter":            hitter_name,
+        "final_count":       final_count,
     }
 
 
@@ -260,29 +266,23 @@ def simulate_at_bat(
 # __main__ demo
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Hardcoded 5-pitch sequence: power FB-slider combo
 _ARSENAL = [
-    # FF up and in
     {"pitch_type": "FF", "release_speed": 96.0,
      "plate_x": -0.4, "plate_z": 3.3,
      "pfx_x": -0.5, "pfx_z": 1.2, "release_spin_rate": 2400,
      "release_pos_x": -1.5, "release_pos_z": 6.0, "release_extension": 6.3},
-    # SL low and away
     {"pitch_type": "SL", "release_speed": 87.0,
      "plate_x": 0.7, "plate_z": 1.8,
      "pfx_x": 0.8, "pfx_z": 0.3, "release_spin_rate": 2600,
      "release_pos_x": -1.6, "release_pos_z": 5.9, "release_extension": 6.2},
-    # FF up and in again (tunnel off first pitch)
     {"pitch_type": "FF", "release_speed": 97.0,
      "plate_x": -0.5, "plate_z": 3.4,
      "pfx_x": -0.5, "pfx_z": 1.2, "release_spin_rate": 2400,
      "release_pos_x": -1.5, "release_pos_z": 6.0, "release_extension": 6.3},
-    # SL back-door (sweeps toward the opposite corner)
     {"pitch_type": "SL", "release_speed": 86.0,
      "plate_x": -0.8, "plate_z": 2.0,
      "pfx_x": 0.8, "pfx_z": 0.3, "release_spin_rate": 2600,
      "release_pos_x": -1.6, "release_pos_z": 5.9, "release_extension": 6.2},
-    # FF elevated — chase pitch
     {"pitch_type": "FF", "release_speed": 97.0,
      "plate_x": 0.1, "plate_z": 3.6,
      "pfx_x": -0.5, "pfx_z": 1.2, "release_spin_rate": 2400,
@@ -290,36 +290,34 @@ _ARSENAL = [
 ]
 
 if __name__ == "__main__":
-    SEP = "═" * 64
+    SEP = "═" * 70
 
     print(SEP)
-    print("PITCH DUEL — Narrative At-Bat Simulator")
+    print("PITCH DUEL — Narrative At-Bat Simulator (three-stage)")
     print(SEP)
 
-    # ── At-bat 1: vs Ohtani ──────────────────────────────────────────────────
     print("\n[AT-BAT 1]  Power FB/SL combo vs Shohei Ohtani")
-    print("─" * 64)
+    print("─" * 70)
     ab1 = simulate_at_bat(_ARSENAL, "Shohei Ohtani")
 
-    # ── At-bat 2: vs Billy Hamilton (weakest hitter) ─────────────────────────
     print(f"\n[AT-BAT 2]  Same arsenal vs Billy Hamilton (weakest by hard-hit rate)")
-    print("─" * 64)
+    print("─" * 70)
     ab2 = simulate_at_bat(_ARSENAL, "Hamilton, Billy")
 
-    # ── Comparison summary ────────────────────────────────────────────────────
     print(f"\n{SEP}")
     print("COMPARISON — Same Pitching, Different Hitter Caliber")
     print(SEP)
-    print(f"  {'Metric':<30} {'vs Ohtani':>10}  {'vs Hamilton':>12}")
-    print(f"  {'─'*30} {'─'*10}  {'─'*12}")
-    print(f"  {'Avg xwOBA':<30} {ab1['avg_xwoba']:>10.3f}  {ab2['avg_xwoba']:>12.3f}")
+    print(f"  {'Metric':<35} {'vs Ohtani':>10}  {'vs Hamilton':>12}")
+    print(f"  {'─'*35} {'─'*10}  {'─'*12}")
+    print(f"  {'Avg P(hard_contact)':<35} {ab1['avg_p_hard_contact']:>10.3f}  "
+          f"{ab2['avg_p_hard_contact']:>12.3f}")
 
     for i, (p1, p2) in enumerate(zip(ab1["pitches"], ab2["pitches"]), 1):
-        print(f"  Pitch {i} xwOBA ({p1['pitch_type']} {p1['speed']:.0f}mph){'':<8} "
-              f"{p1['xwoba']:>10.3f}  {p2['xwoba']:>12.3f}")
+        print(f"  Pitch {i} P(hard) ({p1['pitch_type']} {p1['speed']:.0f}mph){'':<10} "
+              f"{p1['p_hard_contact']:>10.3f}  {p2['p_hard_contact']:>12.3f}")
 
-    spread = ab1["avg_xwoba"] - ab2["avg_xwoba"]
-    print(f"\n  Avg xwOBA gap (Ohtani - Hamilton): {spread:+.3f}")
+    spread = ab1["avg_p_hard_contact"] - ab2["avg_p_hard_contact"]
+    print(f"\n  P(hard_contact) gap (Ohtani - Hamilton): {spread:+.3f}")
     print(f"  Ohtani verdict:   {ab1['verdict']}")
     print(f"  Hamilton verdict: {ab2['verdict']}")
     print()

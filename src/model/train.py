@@ -1,12 +1,11 @@
 """
-train.py — Train the Phase 1 XGBoost xwOBA regressor.
+train.py — Three-stage hitter behavior XGBoost classifiers.
 
-Temporal split: train on 2015-2024, evaluate on 2025-2026.
-Uses 2024 season as early-stopping validation set within training.
+Stage 1: P(swing)              — all pitches
+Stage 2: P(contact | swing)    — swings only
+Stage 3: P(hard_contact | contact) — in-play contact only
 
-Target: estimated_woba_using_speedangle (xwOBA) — measures contact danger
-based on exit velocity and launch angle, independent of defense/luck.
-Non-contact outcomes (strikeouts, walks, etc.) are assigned xwOBA = 0.0.
+Each stage is an XGBClassifier with isotonic calibration on the 2024 val set.
 
 Usage:
     python -m src.model.train
@@ -19,11 +18,13 @@ import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from scipy.stats import pearsonr
 from sklearn.isotonic import IsotonicRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, roc_auc_score
+from sklearn.metrics import roc_auc_score
 
-from src.data.preprocess import ALL_FEATURES, PITCH_TYPE_MAP, PREV_RESULT_MAP
+from src.data.preprocess import (
+    ALL_FEATURES, PITCH_TYPE_MAP, PREV_RESULT_MAP,
+    SWING_DESCRIPTIONS, CONTACT_DESCRIPTIONS, IN_PLAY_DESCRIPTIONS,
+)
 
 PROCESSED_DIR = Path("data/processed")
 MODEL_DIR = Path("models")
@@ -35,7 +36,7 @@ DEFAULT_PARAMS = {
     "subsample": 0.8,
     "colsample_bytree": 0.8,
     "min_child_weight": 50,
-    "eval_metric": "rmse",
+    "eval_metric": "logloss",
     "random_state": 42,
     "n_jobs": -1,
     "tree_method": "hist",
@@ -63,196 +64,128 @@ def load_training_data() -> tuple:
     return train, test
 
 
-def prepare_matrices(train_df: pd.DataFrame, test_df: pd.DataFrame) -> tuple:
-    """Extract feature matrices, xwOBA targets, and sample weights."""
-    missing = [c for c in ALL_FEATURES if c not in train_df.columns]
+def _check_features(df: pd.DataFrame, label: str) -> None:
+    missing = [c for c in ALL_FEATURES if c not in df.columns]
     if missing:
-        raise ValueError(f"Missing feature columns in training data: {missing}")
+        raise ValueError(f"Missing feature columns in {label}: {missing}")
 
-    X_train = train_df[ALL_FEATURES].values
-    y_train = train_df["xwoba"].values
-    w_train = train_df["sample_weight"].values if "sample_weight" in train_df.columns else np.ones(len(train_df))
-    X_test = test_df[ALL_FEATURES].values
-    y_test = test_df["xwoba"].values
 
-    # Fill any residual NaNs with column median
-    nan_cols = train_df[ALL_FEATURES].columns[train_df[ALL_FEATURES].isna().any()].tolist()
+def _fill_nan(df: pd.DataFrame, col_medians: pd.Series = None) -> tuple:
+    """Fill residual NaNs with column medians. Returns (clean_df, col_medians)."""
+    nan_cols = df[ALL_FEATURES].columns[df[ALL_FEATURES].isna().any()].tolist()
     if nan_cols:
-        print(f"Residual NaN columns (filling with column median): {nan_cols}")
-        col_medians = train_df[ALL_FEATURES].median()
-        train_df = train_df.copy()
-        test_df = test_df.copy()
-        train_df[ALL_FEATURES] = train_df[ALL_FEATURES].fillna(col_medians)
-        test_df[ALL_FEATURES] = test_df[ALL_FEATURES].fillna(col_medians)
-        X_train = train_df[ALL_FEATURES].values
-        X_test = test_df[ALL_FEATURES].values
+        print(f"  NaN columns (filling median): {nan_cols}")
+    if col_medians is None:
+        col_medians = df[ALL_FEATURES].median()
+    df = df.copy()
+    df[ALL_FEATURES] = df[ALL_FEATURES].fillna(col_medians)
+    return df, col_medians
 
-    for name, arr in [("X_train", X_train), ("X_test", X_test)]:
+
+# ---------------------------------------------------------------------------
+# Single-stage training
+# ---------------------------------------------------------------------------
+
+def train_one_stage(
+    stage_name: str,
+    target_col: str,
+    fit_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    col_medians: pd.Series,
+) -> dict:
+    """
+    Train one XGBClassifier stage, calibrate it, save artifacts, and print summary.
+
+    Returns dict with model, calibrator, and auc.
+    """
+    print(f"\n{'─' * 60}")
+    print(f"Stage {stage_name.upper()} — P({target_col.replace('target_', '')})")
+    print(f"{'─' * 60}")
+
+    # Validate target exists
+    for df, label in [(fit_df, "fit"), (val_df, "val"), (test_df, "test")]:
+        if target_col not in df.columns:
+            raise ValueError(f"Target column '{target_col}' not in {label} data. "
+                             "Re-run preprocess.py to add three-stage targets.")
+
+    # Fill NaNs using pre-computed medians
+    fit_df, _ = _fill_nan(fit_df, col_medians)
+    val_df, _ = _fill_nan(val_df, col_medians)
+    test_df, _ = _fill_nan(test_df, col_medians)
+
+    X_fit  = fit_df[ALL_FEATURES].values
+    y_fit  = fit_df[target_col].values
+    w_fit  = fit_df["sample_weight"].values if "sample_weight" in fit_df.columns else np.ones(len(fit_df))
+    X_val  = val_df[ALL_FEATURES].values
+    y_val  = val_df[target_col].values
+    X_test = test_df[ALL_FEATURES].values
+    y_test = test_df[target_col].values
+
+    # Verify no residual NaNs
+    for name, arr in [("X_fit", X_fit), ("X_val", X_val), ("X_test", X_test)]:
         n_nan = np.isnan(arr).sum()
         if n_nan > 0:
-            raise ValueError(f"{n_nan} NaN values remain in {name} after imputation.")
+            raise ValueError(f"{n_nan} NaN values remain in {name}.")
 
-    print(f"X_train: {X_train.shape}  |  X_test: {X_test.shape}")
-    print(f"Mean xwOBA — train: {y_train.mean():.4f}  |  test: {y_test.mean():.4f}")
-    return X_train, y_train, w_train, X_test, y_test
+    pos = y_fit.sum()
+    neg = len(y_fit) - pos
+    rate = pos / len(y_fit)
+    scale_pos_weight = neg / pos if pos > 0 else 1.0
 
+    print(f"  Training rows: {len(fit_df):,}")
+    print(f"  Positive rate: {rate:.3f}  (scale_pos_weight={scale_pos_weight:.2f})")
 
-# ---------------------------------------------------------------------------
-# Training
-# ---------------------------------------------------------------------------
-
-def train_model(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    w_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
-    params: dict = None,
-) -> xgb.XGBRegressor:
-    """
-    Train XGBRegressor on xwOBA target.
-    Era-based sample_weight passed to fit() for per-row weighting.
-    Early stopping monitors RMSE on the provided validation set.
-    """
-    if params is None:
-        params = DEFAULT_PARAMS.copy()
-
-    model = xgb.XGBRegressor(**params)
+    params = DEFAULT_PARAMS.copy()
+    params["scale_pos_weight"] = scale_pos_weight
+    model = xgb.XGBClassifier(**params)
     model.fit(
-        X_train, y_train,
-        sample_weight=w_train,
+        X_fit, y_fit,
+        sample_weight=w_fit,
         eval_set=[(X_val, y_val)],
         verbose=50,
     )
-    print(f"Best iteration: {model.best_iteration}")
-    return model
+    print(f"  Best iteration: {model.best_iteration}")
 
+    # Test AUC
+    test_proba = model.predict_proba(X_test)[:, 1]
+    auc = roc_auc_score(y_test, test_proba)
+    print(f"  Test AUC: {auc:.4f}")
 
-# ---------------------------------------------------------------------------
-# Evaluation
-# ---------------------------------------------------------------------------
-
-def evaluate_model(
-    model: xgb.XGBRegressor,
-    X_test: np.ndarray,
-    y_test: np.ndarray,
-    y_test_hit: np.ndarray = None,
-    feature_cols: list = None,
-) -> dict:
-    """
-    Compute regression metrics plus binarized AUC for comparison with
-    the previous binary classifier.
-    """
-    preds = model.predict(X_test)
-    preds = np.clip(preds, 0.0, None)  # xwOBA can't be negative
-
-    mae  = mean_absolute_error(y_test, preds)
-    rmse = np.sqrt(mean_squared_error(y_test, preds))
-    r, _ = pearsonr(y_test, preds)
-
-    metrics = {"mae": mae, "rmse": rmse, "pearson_r": r}
-
-    print("\n--- Test Set Metrics (xwOBA regression) ---")
-    print(f"  MAE:              {mae:.4f}")
-    print(f"  RMSE:             {rmse:.4f}")
-    print(f"  Pearson r:        {r:.4f}")
-
-    # Binarized AUC: compare against previous binary classifier baseline
-    if y_test_hit is not None:
-        predicted_hit = (preds > 0.15).astype(int)
-        actual_hit    = (y_test_hit > 0.0).astype(int)
-        if actual_hit.sum() > 0 and actual_hit.sum() < len(actual_hit):
-            auc = roc_auc_score(actual_hit, preds)
-            metrics["auc_binarized"] = auc
-            print(f"  AUC (binarized):  {auc:.4f}  ← compare to previous 0.7805")
-
-    if feature_cols:
-        importances = model.feature_importances_
-        top = sorted(zip(feature_cols, importances), key=lambda x: -x[1])[:40]
-        print("\n--- Top 40 Feature Importances ---")
-        for name, imp in top:
-            print(f"  {name:<35} {imp:.4f}")
-        metrics["feature_importances"] = {n: float(i) for n, i in zip(feature_cols, importances)}
-
-    return metrics
-
-
-# ---------------------------------------------------------------------------
-# Calibration
-# ---------------------------------------------------------------------------
-
-def fit_calibrator(
-    model: xgb.XGBRegressor,
-    X_val: np.ndarray,
-    y_val_xwoba: np.ndarray,
-    model_dir: Path = MODEL_DIR,
-) -> IsotonicRegression:
-    """
-    Fit an isotonic regression calibrator on the val set (2024 season).
-    Corrects systematic bias in the regressor's xwOBA predictions.
-    Saves calibrator to models/calibrator.pkl.
-    """
-    raw_preds = model.predict(X_val)
-    raw_preds = np.clip(raw_preds, 0.0, None)
-
+    # Calibration on val set
+    val_proba = model.predict_proba(X_val)[:, 1]
     calibrator = IsotonicRegression(out_of_bounds="clip")
-    calibrator.fit(raw_preds, y_val_xwoba)
+    calibrator.fit(val_proba, y_val)
+    cal_val = calibrator.predict(val_proba)
+    print(f"  Calibration — val mean: raw={val_proba.mean():.4f}  "
+          f"cal={cal_val.mean():.4f}  actual={y_val.mean():.4f}")
 
-    cal_preds = calibrator.predict(raw_preds)
-    print("\n--- Calibration (on 2024 val set) ---")
-    print(f"  Before — mean predicted xwOBA: {raw_preds.mean():.4f}  |  actual: {y_val_xwoba.mean():.4f}")
-    print(f"  After  — mean predicted xwOBA: {cal_preds.mean():.4f}  |  actual: {y_val_xwoba.mean():.4f}")
+    # Top 5 features by importance
+    importances = model.feature_importances_
+    top5 = sorted(zip(ALL_FEATURES, importances), key=lambda x: -x[1])[:5]
+    print(f"  Top 5 features: {', '.join(f'{n}({v:.4f})' for n, v in top5)}")
 
-    model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(calibrator, model_dir / "calibrator.pkl")
-    print(f"  Calibrator saved to {model_dir}/calibrator.pkl")
+    # Save artifacts
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    model.save_model(str(MODEL_DIR / f"{stage_name}_model.json"))
+    joblib.dump(calibrator, MODEL_DIR / f"{stage_name}_calibrator.pkl")
 
-    return calibrator
+    # Save per-stage feature importances
+    feat_imp = {n: float(v) for n, v in zip(ALL_FEATURES, importances)}
+    with open(MODEL_DIR / f"{stage_name}_feature_importances.json", "w") as f:
+        json.dump(feat_imp, f, indent=2)
 
+    print(f"  Saved: {stage_name}_model.json, {stage_name}_calibrator.pkl")
 
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
-
-def save_model(
-    model: xgb.XGBRegressor,
-    feature_cols: list,
-    metrics: dict,
-    model_dir: Path = MODEL_DIR,
-) -> Path:
-    """Save model (XGBoost native JSON), feature list, metrics, and encodings."""
-    model_dir.mkdir(parents=True, exist_ok=True)
-
-    model_path = model_dir / "pitch_duel_xgb.json"
-    model.save_model(str(model_path))
-
-    with open(model_dir / "feature_cols.json", "w") as f:
-        json.dump(feature_cols, f, indent=2)
-
-    serializable_metrics = {}
-    for k, v in metrics.items():
-        if isinstance(v, (np.floating, float)):
-            serializable_metrics[k] = float(v)
-        elif isinstance(v, dict):
-            serializable_metrics[k] = {kk: float(vv) for kk, vv in v.items()}
-        else:
-            serializable_metrics[k] = v
-    with open(model_dir / "metrics.json", "w") as f:
-        json.dump(serializable_metrics, f, indent=2)
-
-    with open(model_dir / "encodings.json", "w") as f:
-        json.dump({"PITCH_TYPE_MAP": PITCH_TYPE_MAP, "PREV_RESULT_MAP": PREV_RESULT_MAP}, f, indent=2)
-
-    print(f"\nModel saved to {model_path}")
-    return model_path
+    return {"model": model, "calibrator": calibrator, "auc": auc, "rate": rate}
 
 
 # ---------------------------------------------------------------------------
 # Full training pipeline
 # ---------------------------------------------------------------------------
 
-def run_training() -> xgb.XGBRegressor:
-    # Preprocess if necessary
+def run_training() -> dict:
+    """Train all three stages and return artifacts dict."""
     path = PROCESSED_DIR / "statcast_processed.parquet"
     if not path.exists():
         print("Statcast data not preprocessed. Running preprocess.py...")
@@ -264,24 +197,75 @@ def run_training() -> xgb.XGBRegressor:
 
     train_df, test_df = load_training_data()
 
-    # Use 2024 season as early-stopping validation set within training
+    # 2024 as early-stopping val; pre-2024 as fit
     val_cutoff = pd.Timestamp("2024-01-01")
-    val_df  = train_df[train_df["game_date"] >= val_cutoff].copy()
-    fit_df  = train_df[train_df["game_date"] < val_cutoff].copy()
+    val_df = train_df[train_df["game_date"] >= val_cutoff].copy()
+    fit_df = train_df[train_df["game_date"] < val_cutoff].copy()
     print(f"Fit: {len(fit_df):,}  |  Val (2024): {len(val_df):,}")
 
-    X_fit, y_fit, w_fit, _, _ = prepare_matrices(fit_df, val_df)
-    X_val   = val_df[ALL_FEATURES].values
-    y_val   = val_df["xwoba"].values
-    X_test  = test_df[ALL_FEATURES].values
-    y_test  = test_df["xwoba"].values
-    y_test_hit = test_df["hit"].values
+    # Validate features
+    for df, label in [(fit_df, "fit"), (val_df, "val"), (test_df, "test")]:
+        _check_features(df, label)
 
-    model = train_model(X_fit, y_fit, w_fit, X_val, y_val)
-    fit_calibrator(model, X_val, y_val)
-    metrics = evaluate_model(model, X_test, y_test, y_test_hit=y_test_hit, feature_cols=ALL_FEATURES)
-    save_model(model, ALL_FEATURES, metrics)
-    return model
+    # Compute shared column medians from fit set (used for NaN imputation across stages)
+    nan_cols_global = fit_df[ALL_FEATURES].columns[fit_df[ALL_FEATURES].isna().any()].tolist()
+    col_medians = fit_df[ALL_FEATURES].median()
+
+    # ── Stage 1: P(swing) ────────────────────────────────────────────────────
+    s1 = train_one_stage("swing", "target_swing", fit_df, val_df, test_df, col_medians)
+
+    # ── Stage 2: P(contact | swing) ─────────────────────────────────────────
+    # Train only on pitches where the hitter swung
+    fit_swing  = fit_df[fit_df["target_swing"] == 1]
+    val_swing  = val_df[val_df["target_swing"] == 1]
+    test_swing = test_df[test_df["target_swing"] == 1]
+    print(f"\n  [contact] Swing subsets — fit: {len(fit_swing):,}  val: {len(val_swing):,}  test: {len(test_swing):,}")
+    s2 = train_one_stage("contact", "target_contact", fit_swing, val_swing, test_swing, col_medians)
+
+    # ── Stage 3: P(hard_contact | contact) ──────────────────────────────────
+    # Train only on pitches that were put in play (contact + in-play description)
+    # Fouls don't have launch_speed so we restrict to in-play descriptions
+    in_play_mask = fit_df["description"].isin(IN_PLAY_DESCRIPTIONS)
+    fit_contact  = fit_df[in_play_mask]
+    in_play_mask_val = val_df["description"].isin(IN_PLAY_DESCRIPTIONS)
+    val_contact  = val_df[in_play_mask_val]
+    in_play_mask_test = test_df["description"].isin(IN_PLAY_DESCRIPTIONS)
+    test_contact = test_df[in_play_mask_test]
+    print(f"\n  [hard_contact] In-play subsets — fit: {len(fit_contact):,}  val: {len(val_contact):,}  test: {len(test_contact):,}")
+    s3 = train_one_stage("hard_contact", "target_hard_contact", fit_contact, val_contact, test_contact, col_medians)
+
+    # ── Shared artifacts ─────────────────────────────────────────────────────
+    with open(MODEL_DIR / "feature_cols.json", "w") as f:
+        json.dump(ALL_FEATURES, f, indent=2)
+    with open(MODEL_DIR / "encodings.json", "w") as f:
+        json.dump({"PITCH_TYPE_MAP": PITCH_TYPE_MAP, "PREV_RESULT_MAP": PREV_RESULT_MAP}, f, indent=2)
+
+    metrics = {
+        "swing_auc":        round(s1["auc"], 4),
+        "swing_rate":       round(s1["rate"], 4),
+        "contact_auc":      round(s2["auc"], 4),
+        "contact_rate":     round(s2["rate"], 4),
+        "hard_contact_auc": round(s3["auc"], 4),
+        "hard_contact_rate": round(s3["rate"], 4),
+    }
+    with open(MODEL_DIR / "metrics.json", "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    print("\n" + "═" * 60)
+    print("TRAINING SUMMARY")
+    print("═" * 60)
+    print(f"  Stage 1 — P(swing)             AUC: {s1['auc']:.4f}  rate: {s1['rate']:.3f}")
+    print(f"  Stage 2 — P(contact|swing)     AUC: {s2['auc']:.4f}  rate: {s2['rate']:.3f}")
+    print(f"  Stage 3 — P(hard_contact|con.) AUC: {s3['auc']:.4f}  rate: {s3['rate']:.3f}")
+    print(f"\n  Artifacts saved to {MODEL_DIR}/")
+
+    return {
+        "swing": s1["model"], "swing_cal": s1["calibrator"],
+        "contact": s2["model"], "contact_cal": s2["calibrator"],
+        "hard_contact": s3["model"], "hard_contact_cal": s3["calibrator"],
+        "metrics": metrics,
+    }
 
 
 if __name__ == "__main__":

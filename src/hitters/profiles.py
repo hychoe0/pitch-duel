@@ -520,6 +520,12 @@ def profile_to_feature_dict(profile: HitterProfile) -> dict:
     # Pitch family whiff rates (4 features)
     for fam in PITCH_FAMILY_LIST:
         d[f"hitter_whiff_rate_{fam}"] = profile.family_whiff_rates.get(fam, LEAGUE_AVG["whiff_rate"])
+    # Count-specific swing rates (12 features: all (balls, strikes) combos 0-0 through 3-2)
+    # Used during preprocessing to resolve hitter_swing_rate_this_count per row.
+    for b in range(4):
+        for s in range(3):
+            key = f"{b}-{s}"
+            d[f"hitter_swing_rate_count_{b}_{s}"] = profile.swing_rate_by_count.get(key, profile.swing_rate)
     return d
 
 

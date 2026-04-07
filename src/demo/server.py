@@ -17,12 +17,11 @@ import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, request, render_template
 
-from src.model.predict import predict_hit_probability
+from src.model.predict import predict_pitch
 from src.demo.at_bat import simulate_at_bat
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIR = ROOT / "data" / "processed" / "profiles"
-PITCHER_FEAT = ROOT / "data" / "processed" / "pitcher_features.parquet"
 
 app = Flask(__name__, template_folder=ROOT / "src" / "demo" / "templates")
 
@@ -33,7 +32,7 @@ app = Flask(__name__, template_folder=ROOT / "src" / "demo" / "templates")
 
 ZONE_X_MIN, ZONE_X_MAX = -0.85, 0.85
 ZONE_Z_MIN, ZONE_Z_MAX = 1.5, 3.5
-CHASE_BORDER = 0.5  # feet outside zone edges
+CHASE_BORDER = 0.5
 
 
 def classify_pitch_zone(plate_x: float, plate_z: float) -> str:
@@ -49,41 +48,26 @@ def classify_pitch_zone(plate_x: float, plate_z: float) -> str:
     return "waste"
 
 
-def classify_pitch_quality(plate_x: float, plate_z: float, xwoba: float) -> dict:
-    """
-    Combine zone location with xwOBA to produce a pitch quality label and color.
+def _stage_quality_color(p_hard_contact: float, zone: str) -> str:
+    """Color encoding based on hard-contact probability and zone."""
+    if zone == "waste":
+        return "#8b949e" if p_hard_contact < 0.05 else "#d29922"
+    if p_hard_contact < 0.05:
+        return "#3fb950"
+    if p_hard_contact < 0.12:
+        return "#79c0ff"
+    if p_hard_contact < 0.22:
+        return "#d29922"
+    if p_hard_contact < 0.32:
+        return "#db6d28"
+    return "#f85149"
 
-    Returns: {"zone": str, "quality": str, "color": str}
-    """
-    zone = classify_pitch_zone(plate_x, plate_z)
-
-    if zone == "in_zone":
-        if xwoba < 0.06:
-            return {"zone": zone, "quality": "Dominant", "color": "#3fb950"}
-        elif xwoba < 0.15:
-            return {"zone": zone, "quality": "Competitive", "color": "#d29922"}
-        elif xwoba < 0.20:
-            return {"zone": zone, "quality": "Danger", "color": "#db6d28"}
-        else:
-            return {"zone": zone, "quality": "Danger — mistake pitch", "color": "#f85149"}
-    elif zone == "chase":
-        if xwoba < 0.06:
-            return {"zone": zone, "quality": "Chase pitch", "color": "#3fb950"}
-        elif xwoba < 0.15:
-            return {"zone": zone, "quality": "Nibbling", "color": "#d29922"}
-        else:
-            return {"zone": zone, "quality": "Caught too much plate", "color": "#db6d28"}
-    else:  # waste
-        if xwoba > 0.10:
-            return {"zone": zone, "quality": "Ball — hitter chased", "color": "#d29922"}
-        return {"zone": zone, "quality": "Ball", "color": "#8b949e"}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Data loaders (cached at startup)
 # ──────────────────────────────────────────────────────────────────────────────
 
 _HITTERS_CACHE = None
-_PITCHERS_CACHE = None
 
 
 def load_hitters():
@@ -103,53 +87,28 @@ def load_hitters():
     return _HITTERS_CACHE
 
 
-def load_pitchers():
-    global _PITCHERS_CACHE
-    if _PITCHERS_CACHE is not None:
-        return _PITCHERS_CACHE
-
-    try:
-        df = pd.read_parquet(PITCHER_FEAT, columns=["pitcher"])
-        pitchers = []
-        for pid in sorted(df["pitcher"].unique()):
-            pitchers.append({"id": int(pid), "name": f"Pitcher {pid}"})
-        _PITCHERS_CACHE = pitchers
-    except Exception:
-        _PITCHERS_CACHE = []
-    return _PITCHERS_CACHE
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Routes
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    """Serve the main interface."""
     return render_template("index.html")
 
 
 @app.route("/hitters", methods=["GET"])
 def hitters():
-    """Return list of available hitter names."""
     return jsonify({"hitters": load_hitters()})
-
-
-@app.route("/pitchers", methods=["GET"])
-def pitchers():
-    """Return list of available pitcher IDs and names."""
-    return jsonify({"pitchers": load_pitchers()})
 
 
 @app.route("/predict", methods=["POST"])
 def predict():
     """
-    Single-pitch prediction endpoint.
+    Single-pitch three-stage prediction.
 
     Request JSON:
     {
         "hitter_name": str,
-        "pitcher_id": int (optional),
         "pitch": {
             "release_speed": float,
             "release_spin_rate": float,
@@ -163,69 +122,56 @@ def predict():
             "pitch_type": str,
             "balls": int,
             "strikes": int,
-            "pitch_number": int,
-            "prev_pitch_type": str,
-            "prev_pitch_speed": float,
-            "prev_pitch_result": str,
-            "on_1b": bool/null,
-            "on_2b": bool/null,
-            "on_3b": bool/null,
-            "inning": int,
-            "score_diff": int,
-            "p_throws": str,
+            ...
         }
     }
 
     Response JSON:
     {
-        "xwoba": float,
-        "interpretation": str,
-        "model_type": str,
+        "p_swing": float,
+        "p_contact_given_swing": float,
+        "p_hard_given_contact": float,
+        "p_contact": float,
+        "p_hard_contact": float,
+        "pitch_quality": str,
+        "zone": str,
+        "quality_color": str,
     }
     """
     try:
         data = request.get_json()
         hitter_name = data.get("hitter_name")
-        pitcher_id = data.get("pitcher_id")
-        pitch_dict = data.get("pitch", {})
+        pitch_dict  = data.get("pitch", {})
 
-        # Fill in missing required fields with defaults
         defaults = {
             "release_spin_rate": 2400.0,
-            "pfx_x": -0.5,
-            "pfx_z": 1.2,
-            "release_pos_x": -1.5,
-            "release_pos_z": 6.0,
-            "release_extension": 6.3,
+            "pfx_x": -0.5, "pfx_z": 1.2,
+            "release_pos_x": -1.5, "release_pos_z": 6.0, "release_extension": 6.3,
             "pitch_number": 1,
-            "prev_pitch_type": "FIRST_PITCH",
-            "prev_pitch_speed": 0.0,
+            "prev_pitch_type": "FIRST_PITCH", "prev_pitch_speed": 0.0,
             "prev_pitch_result": "FIRST_PITCH",
-            "on_1b": None,
-            "on_2b": None,
-            "on_3b": None,
-            "inning": 1,
-            "score_diff": 0,
-            "p_throws": "R",
+            "on_1b": None, "on_2b": None, "on_3b": None,
+            "inning": 1, "score_diff": 0, "p_throws": "R",
             "game_date": date.today().isoformat(),
         }
         for k, v in defaults.items():
             if k not in pitch_dict:
                 pitch_dict[k] = v
 
-        result = predict_hit_probability(pitch_dict, hitter_name, pitcher_id)
+        result = predict_pitch(pitch_dict, hitter_name)
 
-        xw = result["xwoba_prediction"]
-        px = float(pitch_dict.get("plate_x", 0))
-        pz = float(pitch_dict.get("plate_z", 2.5))
-        pq = classify_pitch_quality(px, pz, xw)
+        zone = result["zone"]
+        color = _stage_quality_color(result["p_hard_contact"], zone)
 
         return jsonify({
-            "xwoba": round(xw, 4),
-            "interpretation": pq["quality"],
-            "zone": pq["zone"],
-            "quality_color": pq["color"],
-            "model_type": result.get("model_type", "regressor"),
+            "p_swing":               result["p_swing"],
+            "p_contact_given_swing": result["p_contact_given_swing"],
+            "p_hard_given_contact":  result["p_hard_given_contact"],
+            "p_contact":             result["p_contact"],
+            "p_hard_contact":        result["p_hard_contact"],
+            "pitch_quality":         result["pitch_quality"],
+            "zone":                  zone,
+            "quality_color":         color,
         })
 
     except Exception as e:
@@ -240,7 +186,6 @@ def at_bat():
     Request JSON:
     {
         "hitter_name": str,
-        "pitcher_id": int (optional),
         "p_throws": str (default "R"),
         "pitches": [
             {
@@ -248,39 +193,17 @@ def at_bat():
                 "release_speed": float,
                 "plate_x": float,
                 "plate_z": float,
-                "release_spin_rate": float (optional),
-                "pfx_x": float (optional),
-                "pfx_z": float (optional),
-                ...other optional fields...
+                ...optional fields...
             },
             ...
         ]
-    }
-
-    Response JSON:
-    {
-        "hitter": str,
-        "pitches": [
-            {
-                "pitch_num": int,
-                "pitch_type": str,
-                "speed": float,
-                "xwoba": float,
-                "interpretation": str,
-                "location": str,
-            },
-            ...
-        ],
-        "avg_xwoba": float,
-        "verdict": str,
     }
     """
     try:
         data = request.get_json()
         hitter_name = data.get("hitter_name")
-        pitcher_id = data.get("pitcher_id")
-        p_throws = data.get("p_throws", "R")
-        pitches = data.get("pitches", [])
+        p_throws    = data.get("p_throws", "R")
+        pitches     = data.get("pitches", [])
 
         if not pitches:
             return jsonify({"error": "No pitches provided"}), 400
@@ -288,7 +211,6 @@ def at_bat():
         result = simulate_at_bat(
             pitcher_arsenal=pitches,
             hitter_name=hitter_name,
-            pitcher_id=pitcher_id,
             p_throws=p_throws,
             verbose=False,
         )
@@ -297,25 +219,29 @@ def at_bat():
             "hitter": result["hitter"],
             "pitches": [
                 {
-                    "pitch_num": p["pitch_num"],
-                    "pitch_type": p["pitch_type"],
-                    "speed": round(p["speed"], 1),
-                    "location": p["location"],
-                    "xwoba": round(p["xwoba"], 4),
-                    "interpretation": p["interpretation"],
+                    "pitch_num":             p["pitch_num"],
+                    "pitch_type":            p["pitch_type"],
+                    "speed":                 round(p["speed"], 1),
+                    "location":              p["location"],
+                    "p_swing":               round(p["p_swing"], 4),
+                    "p_contact_given_swing": round(p["p_contact_given_swing"], 4),
+                    "p_hard_given_contact":  round(p["p_hard_given_contact"], 4),
+                    "p_contact":             round(p["p_contact"], 4),
+                    "p_hard_contact":        round(p["p_hard_contact"], 4),
+                    "pitch_quality":         p["pitch_quality"],
                 }
                 for p in result["pitches"]
             ],
-            "avg_xwoba": result["avg_xwoba"],
+            "avg_p_hard_contact": result["avg_p_hard_contact"],
             "best_pitch": {
-                "num": result["best_pitch"]["pitch_num"],
-                "type": result["best_pitch"]["pitch_type"],
-                "xwoba": round(result["best_pitch"]["xwoba"], 4),
+                "num":          result["best_pitch"]["pitch_num"],
+                "type":         result["best_pitch"]["pitch_type"],
+                "p_hard_contact": round(result["best_pitch"]["p_hard_contact"], 4),
             },
             "worst_pitch": {
-                "num": result["worst_pitch"]["pitch_num"],
-                "type": result["worst_pitch"]["pitch_type"],
-                "xwoba": round(result["worst_pitch"]["xwoba"], 4),
+                "num":          result["worst_pitch"]["pitch_num"],
+                "type":         result["worst_pitch"]["pitch_type"],
+                "p_hard_contact": round(result["worst_pitch"]["p_hard_contact"], 4),
             },
             "verdict": result["verdict"],
         })
@@ -327,107 +253,71 @@ def at_bat():
 @app.route("/batch", methods=["POST"])
 def batch():
     """
-    Batch prediction for CSV data.
+    Batch prediction endpoint.
 
     Request JSON:
     {
         "hitter_name": str,
-        "pitcher_id": int (optional),
-        "pitches": [
-            {
-                "pitch_type": str,
-                "release_speed": float,
-                "plate_x": float,
-                "plate_z": float,
-                "release_spin_rate": float (optional),
-                ...
-            },
-            ...
-        ]
-    }
-
-    Response JSON:
-    {
-        "predictions": [
-            {
-                "pitch_num": int,
-                "pitch_type": str,
-                "speed": float,
-                "plate_x": float,
-                "plate_z": float,
-                "xwoba": float,
-                "interpretation": str,
-            },
-            ...
-        ],
-        "summary": {
-            "mean_xwoba": float,
-            "min_xwoba": float,
-            "max_xwoba": float,
-        }
+        "pitches": [{"pitch_type": str, "release_speed": float, ...}, ...]
     }
     """
     try:
         data = request.get_json()
         hitter_name = data.get("hitter_name")
-        pitcher_id = data.get("pitcher_id")
-        pitches = data.get("pitches", [])
+        pitches     = data.get("pitches", [])
 
         if not pitches:
             return jsonify({"error": "No pitches provided"}), 400
 
-        predictions = []
         defaults = {
             "release_spin_rate": 2400.0,
-            "pfx_x": -0.5,
-            "pfx_z": 1.2,
-            "release_pos_x": -1.5,
-            "release_pos_z": 6.0,
-            "release_extension": 6.3,
+            "pfx_x": -0.5, "pfx_z": 1.2,
+            "release_pos_x": -1.5, "release_pos_z": 6.0, "release_extension": 6.3,
             "pitch_number": 1,
-            "prev_pitch_type": "FIRST_PITCH",
-            "prev_pitch_speed": 0.0,
+            "prev_pitch_type": "FIRST_PITCH", "prev_pitch_speed": 0.0,
             "prev_pitch_result": "FIRST_PITCH",
-            "on_1b": None,
-            "on_2b": None,
-            "on_3b": None,
-            "inning": 1,
-            "score_diff": 0,
-            "p_throws": "R",
+            "on_1b": None, "on_2b": None, "on_3b": None,
+            "inning": 1, "score_diff": 0, "p_throws": "R",
             "game_date": date.today().isoformat(),
         }
 
-        xwobas = []
+        predictions = []
         for i, pitch_data in enumerate(pitches, 1):
             pitch_dict = {**defaults, **pitch_data}
-            result = predict_hit_probability(pitch_dict, hitter_name, pitcher_id)
-            xw = result["xwoba_prediction"]
-            xwobas.append(xw)
+            result = predict_pitch(pitch_dict, hitter_name)
 
             px = float(pitch_data.get("plate_x", 0))
             pz = float(pitch_data.get("plate_z", 0))
-            pq = classify_pitch_quality(px, pz, xw)
+            zone  = result["zone"]
+            color = _stage_quality_color(result["p_hard_contact"], zone)
 
             predictions.append({
-                "pitch_num": i,
-                "pitch_type": pitch_data.get("pitch_type", "?"),
-                "speed": round(pitch_data.get("release_speed", 0), 1),
-                "plate_x": round(px, 2),
-                "plate_z": round(pz, 2),
-                "xwoba": round(xw, 4),
-                "interpretation": pq["quality"],
-                "zone": pq["zone"],
-                "quality_color": pq["color"],
+                "pitch_num":             i,
+                "pitch_type":            pitch_data.get("pitch_type", "?"),
+                "speed":                 round(pitch_data.get("release_speed", 0), 1),
+                "plate_x":               round(px, 2),
+                "plate_z":               round(pz, 2),
+                "p_swing":               result["p_swing"],
+                "p_contact_given_swing": result["p_contact_given_swing"],
+                "p_hard_given_contact":  result["p_hard_given_contact"],
+                "p_contact":             result["p_contact"],
+                "p_hard_contact":        result["p_hard_contact"],
+                "pitch_quality":         result["pitch_quality"],
+                "zone":                  zone,
+                "quality_color":         color,
+                # legacy key for SVG rendering
+                "xwoba_pred":            result["p_hard_contact"],
             })
 
+        hard_vals = [p["p_hard_contact"] for p in predictions]
         return jsonify({
             "hitter": hitter_name,
             "predictions": predictions,
             "summary": {
-                "n_pitches": len(xwobas),
-                "mean_xwoba": round(sum(xwobas) / len(xwobas), 4) if xwobas else 0,
-                "min_xwoba": round(min(xwobas), 4) if xwobas else 0,
-                "max_xwoba": round(max(xwobas), 4) if xwobas else 0,
+                "n_pitches":           len(predictions),
+                "mean_p_hard_contact": round(float(np.mean(hard_vals)), 4) if hard_vals else 0,
+                "min_p_hard_contact":  round(float(np.min(hard_vals)), 4) if hard_vals else 0,
+                "max_p_hard_contact":  round(float(np.max(hard_vals)), 4) if hard_vals else 0,
             }
         })
 
@@ -441,17 +331,10 @@ def game_log():
     Hitter game-log evaluation endpoint.
 
     Accepts a Baseball Savant CSV (text body or file upload), parses every
-    pitch thrown TO the hitter, runs predict_hit_probability for each,
-    and compares predicted xwOBA to actual outcomes.
-
-    Baseball Savant column names are model-native (release_speed, pfx_x, etc.).
-    Rows are sorted ascending by (game_pk, at_bat_number, pitch_number) since
-    Savant exports in reverse order within at-bats.
-
-    Returns structured JSON with per-pitch, per-PA, and summary data.
+    pitch thrown TO the hitter, runs predict_pitch for each, and returns
+    three-stage predictions per pitch alongside actual outcomes.
     """
     try:
-        # Accept CSV as raw text in JSON body, or file upload
         if request.content_type and "multipart" in request.content_type:
             f = request.files.get("file")
             if not f:
@@ -465,51 +348,39 @@ def game_log():
 
         df = pd.read_csv(io.StringIO(csv_text))
 
-        # Validate required columns
         required = ["pitch_type", "release_speed", "plate_x", "plate_z",
-                     "balls", "strikes", "pitch_number", "at_bat_number",
-                     "game_pk", "batter", "description"]
+                    "balls", "strikes", "pitch_number", "at_bat_number",
+                    "game_pk", "batter", "description"]
         missing = [c for c in required if c not in df.columns]
         if missing:
             return jsonify({"error": f"Missing columns: {missing}"}), 400
 
-        # Resolve hitter name from batter ID
-        batter_id = int(df["batter"].iloc[0])
+        batter_id   = int(df["batter"].iloc[0])
         hitter_name = _resolve_hitter_name(batter_id)
 
-        # Sort ascending (Savant exports reverse order within at-bats)
         df = df.sort_values(["game_pk", "at_bat_number", "pitch_number"]).reset_index(drop=True)
 
-        # Build pitcher lookup for each PA
-        pitcher_ids = df.groupby(["game_pk", "at_bat_number"])["pitcher"].first().to_dict() if "pitcher" in df.columns else {}
-
-        # Process each at-bat
         at_bats = []
         all_pitches = []
-        outcome_buckets = {}  # description → list of xwobas
+        # description → lists of three-stage probabilities
+        outcome_buckets: dict = {}
 
         for (gpk, abn), ab_df in df.groupby(["game_pk", "at_bat_number"], sort=False):
             ab_df = ab_df.sort_values("pitch_number").reset_index(drop=True)
             pa_pitches = []
-            pitcher_id = pitcher_ids.get((gpk, abn))
-            if pitcher_id is not None:
-                pitcher_id = int(pitcher_id)
 
             for idx, row in ab_df.iterrows():
-                # Build prev-pitch context
-                if idx == 0:
-                    prev_type = "FIRST_PITCH"
-                    prev_speed = 0.0
-                    prev_result = "FIRST_PITCH"
-                else:
-                    prev_row = ab_df.iloc[idx - 1]
-                    prev_type = str(prev_row.get("pitch_type", "FIRST_PITCH"))
+                prev_type   = "FIRST_PITCH"
+                prev_speed  = 0.0
+                prev_result = "FIRST_PITCH"
+                if idx > 0:
+                    prev_row    = ab_df.iloc[idx - 1]
+                    prev_type   = str(prev_row.get("pitch_type", "FIRST_PITCH"))
                     if prev_type == "nan":
                         prev_type = "FIRST_PITCH"
-                    prev_speed = float(prev_row.get("release_speed", 0) or 0)
+                    prev_speed  = float(prev_row.get("release_speed", 0) or 0)
                     prev_result = str(prev_row.get("description", "FIRST_PITCH"))
 
-                # Compute score_diff from CSV columns
                 score_diff = 0
                 if "bat_score_diff" in row.index and pd.notna(row.get("bat_score_diff")):
                     score_diff = int(row["bat_score_diff"])
@@ -519,79 +390,88 @@ def game_log():
                     if pd.notna(bs) and pd.notna(fs):
                         score_diff = int(bs) - int(fs)
 
-                # Handle NaN pitch_type
                 raw_pt = row.get("pitch_type", "FF")
                 if pd.isna(raw_pt) or str(raw_pt) == "nan":
                     raw_pt = "FF"
 
                 pitch_dict = {
-                    "release_speed": float(row.get("release_speed", 90) or 90),
+                    "release_speed":     float(row.get("release_speed", 90) or 90),
                     "release_spin_rate": float(row.get("release_spin_rate", 2400) or 2400),
-                    "pfx_x": float(row.get("pfx_x", 0) or 0),
-                    "pfx_z": float(row.get("pfx_z", 0) or 0),
-                    "release_pos_x": float(row.get("release_pos_x", -1.5) or -1.5),
-                    "release_pos_z": float(row.get("release_pos_z", 6.0) or 6.0),
+                    "pfx_x":             float(row.get("pfx_x", 0) or 0),
+                    "pfx_z":             float(row.get("pfx_z", 0) or 0),
+                    "release_pos_x":     float(row.get("release_pos_x", -1.5) or -1.5),
+                    "release_pos_z":     float(row.get("release_pos_z", 6.0) or 6.0),
                     "release_extension": float(row.get("release_extension", 6.3) or 6.3),
-                    "plate_x": float(row.get("plate_x", 0) or 0),
-                    "plate_z": float(row.get("plate_z", 2.5) or 2.5),
-                    "pitch_type": str(raw_pt),
-                    "balls": int(row.get("balls", 0) or 0),
-                    "strikes": int(row.get("strikes", 0) or 0),
-                    "pitch_number": int(row.get("pitch_number", 1) or 1),
-                    "prev_pitch_type": prev_type,
-                    "prev_pitch_speed": prev_speed,
+                    "plate_x":           float(row.get("plate_x", 0) or 0),
+                    "plate_z":           float(row.get("plate_z", 2.5) or 2.5),
+                    "pitch_type":        str(raw_pt),
+                    "balls":             int(row.get("balls", 0) or 0),
+                    "strikes":           int(row.get("strikes", 0) or 0),
+                    "pitch_number":      int(row.get("pitch_number", 1) or 1),
+                    "prev_pitch_type":   prev_type,
+                    "prev_pitch_speed":  prev_speed,
                     "prev_pitch_result": prev_result,
-                    "on_1b": row.get("on_1b") if pd.notna(row.get("on_1b")) else None,
-                    "on_2b": row.get("on_2b") if pd.notna(row.get("on_2b")) else None,
-                    "on_3b": row.get("on_3b") if pd.notna(row.get("on_3b")) else None,
-                    "inning": int(row.get("inning", 1) or 1),
-                    "score_diff": score_diff,
-                    "p_throws": str(row.get("p_throws", "R") or "R"),
-                    "stand": str(row.get("stand", "R") or "R"),
-                    "game_date": str(row.get("game_date", date.today().isoformat())),
+                    "on_1b":  row.get("on_1b") if pd.notna(row.get("on_1b")) else None,
+                    "on_2b":  row.get("on_2b") if pd.notna(row.get("on_2b")) else None,
+                    "on_3b":  row.get("on_3b") if pd.notna(row.get("on_3b")) else None,
+                    "inning":      int(row.get("inning", 1) or 1),
+                    "score_diff":  score_diff,
+                    "p_throws":    str(row.get("p_throws", "R") or "R"),
+                    "stand":       str(row.get("stand", "R") or "R"),
+                    "game_date":   str(row.get("game_date", date.today().isoformat())),
                 }
 
-                result = predict_hit_probability(pitch_dict, hitter_name, pitcher_id=pitcher_id)
-                xw = result["xwoba_prediction"]
+                result = predict_pitch(pitch_dict, hitter_name)
+                p_sw   = result["p_swing"]
+                p_con  = result["p_contact_given_swing"]
+                p_hard = result["p_hard_given_contact"]
+                p_hc   = result["p_hard_contact"]
 
                 px = pitch_dict["plate_x"]
                 pz = pitch_dict["plate_z"]
-                pq = classify_pitch_quality(px, pz, xw)
+                zone  = result["zone"]
+                color = _stage_quality_color(p_hc, zone)
 
-                # Actual outcome data
-                desc = str(row.get("description", ""))
+                desc  = str(row.get("description", ""))
                 event = str(row.get("events", "")) if pd.notna(row.get("events")) else ""
                 actual_xwoba = float(row.get("estimated_woba_using_speedangle", 0)) if pd.notna(row.get("estimated_woba_using_speedangle")) else None
-                woba_value = float(row.get("woba_value", 0)) if pd.notna(row.get("woba_value")) else None
+                woba_value   = float(row.get("woba_value", 0)) if pd.notna(row.get("woba_value")) else None
 
                 pitch_info = {
-                    "pitch_num": int(row["pitch_number"]),
-                    "pitch_type": pitch_dict["pitch_type"],
-                    "speed": round(pitch_dict["release_speed"], 1),
-                    "plate_x": round(px, 2),
-                    "plate_z": round(pz, 2),
-                    "count": f"{pitch_dict['balls']}-{pitch_dict['strikes']}",
-                    "xwoba_pred": round(xw, 4),
-                    "xwoba_actual": round(actual_xwoba, 4) if actual_xwoba is not None else None,
-                    "description": desc,
-                    "event": event,
-                    "quality": pq["quality"],
-                    "quality_color": pq["color"],
-                    "zone": pq["zone"],
+                    "pitch_num":             int(row["pitch_number"]),
+                    "pitch_type":            pitch_dict["pitch_type"],
+                    "speed":                 round(pitch_dict["release_speed"], 1),
+                    "plate_x":               round(px, 2),
+                    "plate_z":               round(pz, 2),
+                    "count":                 f"{pitch_dict['balls']}-{pitch_dict['strikes']}",
+                    "p_swing":               round(p_sw, 4),
+                    "p_contact_given_swing": round(p_con, 4),
+                    "p_hard_given_contact":  round(p_hard, 4),
+                    "p_contact":             round(result["p_contact"], 4),
+                    "p_hard_contact":        round(p_hc, 4),
+                    "pitch_quality":         result["pitch_quality"],
+                    "zone":                  zone,
+                    "quality_color":         color,
+                    "description":           desc,
+                    "event":                 event,
+                    "xwoba_actual":          round(actual_xwoba, 4) if actual_xwoba is not None else None,
+                    # legacy key used by SVG builder
+                    "xwoba_pred":            round(p_hc, 4),
                 }
 
                 pa_pitches.append(pitch_info)
                 all_pitches.append(pitch_info)
 
-                # Bucket by pitch description for outcome breakdown
-                bucket = desc
-                if bucket not in outcome_buckets:
-                    outcome_buckets[bucket] = []
-                outcome_buckets[bucket].append(xw)
+                if desc not in outcome_buckets:
+                    outcome_buckets[desc] = {
+                        "p_swing": [], "p_contact": [], "p_hard": []
+                    }
+                outcome_buckets[desc]["p_swing"].append(p_sw)
+                outcome_buckets[desc]["p_contact"].append(p_con)
+                outcome_buckets[desc]["p_hard"].append(p_hard)
 
-            # PA-level summary
-            pa_event = pa_pitches[-1]["event"] if pa_pitches else ""
-            pa_avg_xwoba = sum(p["xwoba_pred"] for p in pa_pitches) / len(pa_pitches) if pa_pitches else 0
+            pa_event    = pa_pitches[-1]["event"] if pa_pitches else ""
+            pa_avg_hard = sum(p["p_hard_contact"] for p in pa_pitches) / len(pa_pitches) if pa_pitches else 0
             pa_woba = None
             if "woba_value" in ab_df.columns:
                 last_woba = ab_df.iloc[-1].get("woba_value")
@@ -599,69 +479,91 @@ def game_log():
                     pa_woba = round(float(last_woba), 3)
 
             at_bats.append({
-                "game_pk": int(gpk),
-                "at_bat_number": int(abn),
-                "pitcher_name": str(ab_df.iloc[0].get("player_name", "")) if "player_name" in ab_df.columns else "",
-                "pitcher_id": pitcher_id,
-                "n_pitches": len(pa_pitches),
-                "event": pa_event,
-                "avg_xwoba_pred": round(pa_avg_xwoba, 4),
-                "woba_value": pa_woba,
-                "pitches": pa_pitches,
+                "game_pk":        int(gpk),
+                "at_bat_number":  int(abn),
+                "pitcher_name":   str(ab_df.iloc[0].get("player_name", "")) if "player_name" in ab_df.columns else "",
+                "n_pitches":      len(pa_pitches),
+                "event":          pa_event,
+                "avg_p_hard":     round(pa_avg_hard, 4),
+                # legacy key
+                "avg_xwoba_pred": round(pa_avg_hard, 4),
+                "woba_value":     pa_woba,
+                "pitches":        pa_pitches,
             })
 
-        # Outcome breakdown table
+        # ── Outcome breakdown table ──────────────────────────────────────────
+        IN_PLAY = {"hit_into_play", "hit_into_play_no_out", "hit_into_play_score"}
+
         outcome_breakdown = []
-        for desc, xwobas in sorted(outcome_buckets.items(), key=lambda x: np.mean(x[1])):
-            outcome_breakdown.append({
-                "description": desc,
-                "count": len(xwobas),
-                "mean_xwoba": round(float(np.mean(xwobas)), 4),
-                "min_xwoba": round(float(np.min(xwobas)), 4),
-                "max_xwoba": round(float(np.max(xwobas)), 4),
-            })
+        for desc, bucket in sorted(outcome_buckets.items()):
+            n = len(bucket["p_swing"])
+            entry = {
+                "description":   desc,
+                "count":         n,
+                "mean_p_swing":  round(float(np.mean(bucket["p_swing"])), 4),
+                "mean_p_contact": round(float(np.mean(bucket["p_contact"])), 4),
+                "mean_p_hard":   round(float(np.mean(bucket["p_hard"])), 4)
+                                  if desc in IN_PLAY or desc == "foul" else None,
+            }
+            outcome_breakdown.append(entry)
+        # Sort: swing descending (called_strike → ball → foul → swinging_strike → hit)
+        outcome_breakdown.sort(key=lambda x: -x["mean_p_swing"])
 
-        # Pitch type breakdown
-        pitch_type_buckets = {}
+        # ── Pitch type breakdown ─────────────────────────────────────────────
+        pt_buckets: dict = {}
         for p in all_pitches:
             pt = p["pitch_type"]
-            if pt not in pitch_type_buckets:
-                pitch_type_buckets[pt] = []
-            pitch_type_buckets[pt].append(p["xwoba_pred"])
+            if pt not in pt_buckets:
+                pt_buckets[pt] = []
+            pt_buckets[pt].append(p["p_hard_contact"])
 
-        pitch_type_breakdown = []
-        for pt, xwobas in sorted(pitch_type_buckets.items(), key=lambda x: np.mean(x[1])):
-            pitch_type_breakdown.append({
-                "pitch_type": pt,
-                "count": len(xwobas),
-                "mean_xwoba": round(float(np.mean(xwobas)), 4),
-            })
+        pitch_type_breakdown = [
+            {
+                "pitch_type":    pt,
+                "count":         len(vals),
+                "mean_p_hard":   round(float(np.mean(vals)), 4),
+            }
+            for pt, vals in sorted(pt_buckets.items(), key=lambda x: np.mean(x[1]))
+        ]
 
-        # Summary
-        all_xwobas = [p["xwoba_pred"] for p in all_pitches]
-        actual_xwobas = [p["xwoba_actual"] for p in all_pitches if p["xwoba_actual"] is not None]
+        # ── Summary ──────────────────────────────────────────────────────────
+        all_hard = [p["p_hard_contact"] for p in all_pitches]
 
-        # Consistency check: does the model rank outcomes directionally correct?
-        # swinging_strike should have lower mean xwoba than hit_into_play
-        ss_mean = np.mean(outcome_buckets.get("swinging_strike", [0]))
-        hip_mean = np.mean(outcome_buckets.get("hit_into_play", [1]))
-        consistent = bool(ss_mean < hip_mean)
+        sw_bucket  = outcome_buckets.get("swinging_strike", {"p_swing": [0]})
+        hip_bucket = outcome_buckets.get("hit_into_play",   {"p_swing": [0]})
+        cs_bucket  = outcome_buckets.get("called_strike",   {"p_swing": [1]})
+        ball_bucket = outcome_buckets.get("ball",           {"p_swing": [1]})
+
+        sw_sw  = np.mean(sw_bucket["p_swing"])
+        hip_sw = np.mean(hip_bucket["p_swing"])
+        cs_sw  = np.mean(cs_bucket["p_swing"])
+        ball_sw = np.mean(ball_bucket["p_swing"])
+
+        # Sanity: swinging_strike P(swing) > called_strike P(swing) > ball P(swing)
+        consistent = bool(sw_sw > cs_sw and cs_sw > ball_sw)
 
         summary = {
-            "hitter": hitter_name,
-            "batter_id": batter_id,
-            "n_pitches": len(all_pitches),
-            "n_pas": len(at_bats),
-            "mean_xwoba_pred": round(float(np.mean(all_xwobas)), 4) if all_xwobas else 0,
-            "mean_xwoba_actual": round(float(np.mean(actual_xwobas)), 4) if actual_xwobas else None,
-            "consistent": consistent,
+            "hitter":         hitter_name,
+            "batter_id":      batter_id,
+            "n_pitches":      len(all_pitches),
+            "n_pas":          len(at_bats),
+            "mean_p_hard":    round(float(np.mean(all_hard)), 4) if all_hard else 0,
+            "consistent":     consistent,
+            "sanity_note":    (
+                "Consistent: swinging_strike P(swing) > called_strike > ball — model "
+                "correctly predicts when the hitter swings."
+                if consistent else
+                "Check: P(swing) ordering may not match behavioral expectations."
+            ),
+            # legacy key used by frontend
+            "mean_pred_all_pitches": round(float(np.mean(all_hard)), 4) if all_hard else 0,
         }
 
         return jsonify({
-            "summary": summary,
-            "outcome_breakdown": outcome_breakdown,
+            "summary":             summary,
+            "outcome_breakdown":   outcome_breakdown,
             "pitch_type_breakdown": pitch_type_breakdown,
-            "at_bats": at_bats,
+            "at_bats":             at_bats,
         })
 
     except Exception as e:
@@ -681,6 +583,7 @@ def _resolve_hitter_name(batter_id: int) -> str:
 
 
 if __name__ == "__main__":
+    # Port 5000 is reserved by macOS AirPlay Receiver — use 5001.
     print("Starting Pitch Duel web interface...")
-    print("Open http://localhost:5000 in your browser")
-    app.run(debug=True, port=5000)
+    print("Open http://localhost:5001 in your browser")
+    app.run(debug=True, port=5001)
