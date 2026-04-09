@@ -195,11 +195,11 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Plate X (ft)</label>
-                        <input type="number" id="plate_x_demo" value="0.0" step="0.1">
+                        <input type="number" id="plate_x_demo" value="0.0" step="0.1" oninput="syncDemoZone()">
                     </div>
                     <div class="form-group">
                         <label>Plate Z (ft)</label>
-                        <input type="number" id="plate_z_demo" value="2.5" step="0.1">
+                        <input type="number" id="plate_z_demo" value="2.5" step="0.1" oninput="syncDemoZone()">
                     </div>
                     <div class="form-group">
                         <label>Balls</label>
@@ -295,8 +295,12 @@
                         </div>
                     </div>
                     <div>
-                        <label style="margin-bottom:8px;display:block;">At-Bat Zone:</label>
-                        <div id="ab_zone_svg"></div>
+                        <label style="margin-bottom:8px;display:block;">Click to set location:</label>
+                        <div id="ab_picker_svg" style="cursor:crosshair;"></div>
+                        <div style="margin-top:10px;">
+                            <label style="margin-bottom:4px;display:block;">At-Bat Zone:</label>
+                            <div id="ab_zone_svg"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -579,14 +583,20 @@
         // TAB 1: Prediction Demo
         // ================================================================
 
-        function initDemoZonePicker() {
-            const sz = 220;
-            const px = parseFloat(document.getElementById('plate_x_demo').value) || 0;
-            const pz = parseFloat(document.getElementById('plate_z_demo').value) || 2.5;
+        function syncDemoZone() {
+            const px = parseFloat(document.getElementById('plate_x_demo').value);
+            const pz = parseFloat(document.getElementById('plate_z_demo').value);
+            if (isNaN(px) || isNaN(pz)) return;
             const container = document.getElementById('demo_zone_picker');
-            container.innerHTML = buildPickerZoneSvg(sz, px, pz);
+            container.innerHTML = buildPickerZoneSvg(220, px, pz);
+            attachDemoZoneClick();
+        }
 
+        function attachDemoZoneClick() {
+            const sz = 220;
+            const container = document.getElementById('demo_zone_picker');
             const svg = container.querySelector('svg');
+            if (!svg) return;
             svg.style.cursor = 'crosshair';
             svg.addEventListener('click', (e) => {
                 const rect = svg.getBoundingClientRect();
@@ -595,10 +605,12 @@
                 const coords = svgToPitch(svgX, svgY, sz);
                 document.getElementById('plate_x_demo').value = coords.px.toFixed(1);
                 document.getElementById('plate_z_demo').value = coords.pz.toFixed(1);
-                container.innerHTML = buildPickerZoneSvg(sz, coords.px, coords.pz);
-                // Re-attach listener
-                initDemoZonePicker();
+                syncDemoZone();
             });
+        }
+
+        function initDemoZonePicker() {
+            syncDemoZone();
         }
 
         async function runPredictDemo() {
@@ -862,11 +874,14 @@
             ab_balls = 0;
             ab_strikes = 0;
             ab_over = false;
+            ab_active_idx = null;
             document.getElementById('pitch_list').innerHTML = '';
             document.getElementById('ab_pitch_results').innerHTML = '';
             document.getElementById('ab_summary').innerHTML = '';
             document.getElementById('ab_count_display').textContent = '0-0';
             updateAbZone();
+            // Reset picker to empty zone
+            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(200, null, null);
         }
 
         function updateAbZone() {
@@ -881,6 +896,8 @@
             document.getElementById('ab_zone_svg').innerHTML = buildZoneSvg(zonePitches, 250, {showNumbers: true});
         }
 
+        let ab_active_idx = null; // which pitch row the zone picker targets
+
         function addPitch() {
             if (ab_over) {
                 displayError('ab_pitch_results', 'At-bat is over. Reset to start a new one.');
@@ -890,31 +907,116 @@
             const idx = ab_pitches.length;
             const defaultPt = 'FF';
             const d = PITCH_DEFAULTS[defaultPt];
-            ab_pitches.push({ pitch_type: defaultPt, release_speed: d.speed, plate_x: 0, plate_z: 2.5 });
+            ab_pitches.push({
+                pitch_type: defaultPt, release_speed: d.speed,
+                plate_x: 0, plate_z: 2.5,
+                spin: d.spin, pfx_x: d.pfx_x, pfx_z: d.pfx_z,
+                rel_x: d.rel_x, rel_z: d.rel_z, ext: d.ext,
+            });
 
             const html = `
-                <div class="pitch-row" id="ab_pitch_${idx}">
-                    <select id="ab_pt_${idx}" onchange="ab_pitches[${idx}].pitch_type=this.value; updateAbPitchSpeed(${idx});">
-                        <option>FF</option><option>SI</option><option>FC</option>
-                        <option>SL</option><option>CU</option><option>CH</option>
-                        <option>FS</option><option>SV</option><option>KC</option>
-                    </select>
-                    <input type="number" id="ab_speed_${idx}" step="0.1" value="${d.speed}" placeholder="MPH"
-                           onchange="ab_pitches[${idx}].release_speed=parseFloat(this.value)">
-                    <input type="number" step="0.1" value="0" placeholder="Plate X"
-                           onchange="ab_pitches[${idx}].plate_x=parseFloat(this.value)">
-                    <input type="number" step="0.1" value="2.5" placeholder="Plate Z"
-                           onchange="ab_pitches[${idx}].plate_z=parseFloat(this.value)">
-                    <button class="secondary" style="padding:8px 12px;width:auto;" onclick="throwPitch(${idx})">Throw</button>
+                <div class="compact-pitch-card" id="ab_pitch_${idx}" style="border-color:${ab_active_idx === null ? '#58a6ff' : '#30363d'};">
+                    <div class="pitch-row" style="grid-template-columns:90px 80px 80px 80px auto auto;margin-bottom:0;">
+                        <select id="ab_pt_${idx}" onchange="updateAbPitchType(${idx})">
+                            <option>FF</option><option>SI</option><option>FC</option>
+                            <option>SL</option><option>CU</option><option>CH</option>
+                            <option>FS</option><option>SV</option><option>KC</option>
+                        </select>
+                        <input type="number" id="ab_speed_${idx}" step="0.1" value="${d.speed}" placeholder="MPH"
+                               oninput="ab_pitches[${idx}].release_speed=parseFloat(this.value)">
+                        <input type="number" id="ab_px_${idx}" step="0.1" value="0" placeholder="Plate X"
+                               oninput="ab_pitches[${idx}].plate_x=parseFloat(this.value); syncAbPicker();">
+                        <input type="number" id="ab_pz_${idx}" step="0.1" value="2.5" placeholder="Plate Z"
+                               oninput="ab_pitches[${idx}].plate_z=parseFloat(this.value); syncAbPicker();">
+                        <button class="secondary" style="padding:8px 12px;width:auto;" onclick="throwPitch(${idx})">Throw</button>
+                        <button class="adv-toggle" style="padding:6px 8px;margin:0;" onclick="toggleAdv('ab_adv_${idx}', this)">+</button>
+                    </div>
+                    <div class="adv-section" id="ab_adv_${idx}" style="margin-top:8px;margin-bottom:0;">
+                        <div class="form-row" style="margin-bottom:0;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75em;">Spin (rpm)</label>
+                                <input type="number" id="ab_spin_${idx}" value="${d.spin}" step="10" style="font-size:0.82em;"
+                                       oninput="ab_pitches[${idx}].spin=parseFloat(this.value)">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75em;">H-Break</label>
+                                <input type="number" id="ab_pfxx_${idx}" value="${d.pfx_x}" step="0.1" style="font-size:0.82em;"
+                                       oninput="ab_pitches[${idx}].pfx_x=parseFloat(this.value)">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75em;">V-Break</label>
+                                <input type="number" id="ab_pfxz_${idx}" value="${d.pfx_z}" step="0.1" style="font-size:0.82em;"
+                                       oninput="ab_pitches[${idx}].pfx_z=parseFloat(this.value)">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75em;">Rel X</label>
+                                <input type="number" id="ab_relx_${idx}" value="${d.rel_x}" step="0.1" style="font-size:0.82em;"
+                                       oninput="ab_pitches[${idx}].rel_x=parseFloat(this.value)">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75em;">Rel Z</label>
+                                <input type="number" id="ab_relz_${idx}" value="${d.rel_z}" step="0.1" style="font-size:0.82em;"
+                                       oninput="ab_pitches[${idx}].rel_z=parseFloat(this.value)">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75em;">Ext</label>
+                                <input type="number" id="ab_ext_${idx}" value="${d.ext}" step="0.1" style="font-size:0.82em;"
+                                       oninput="ab_pitches[${idx}].ext=parseFloat(this.value)">
+                            </div>
+                        </div>
+                    </div>
                 </div>`;
             document.getElementById('pitch_list').insertAdjacentHTML('beforeend', html);
+            ab_active_idx = idx;
+            syncAbPicker();
         }
 
-        function updateAbPitchSpeed(idx) {
-            const pt = ab_pitches[idx].pitch_type;
+        function updateAbPitchType(idx) {
+            const pt = document.getElementById(`ab_pt_${idx}`).value;
+            ab_pitches[idx].pitch_type = pt;
             const d = PITCH_DEFAULTS[pt] || PITCH_DEFAULTS['FF'];
-            const el = document.getElementById(`ab_speed_${idx}`);
-            if (el) { el.value = d.speed; ab_pitches[idx].release_speed = d.speed; }
+            // Update speed
+            const speedEl = document.getElementById(`ab_speed_${idx}`);
+            if (speedEl) { speedEl.value = d.speed; ab_pitches[idx].release_speed = d.speed; }
+            // Update advanced fields
+            const fields = {spin: 'spin', pfx_x: 'pfxx', pfx_z: 'pfxz', rel_x: 'relx', rel_z: 'relz', ext: 'ext'};
+            for (const [key, suffix] of Object.entries(fields)) {
+                const el = document.getElementById(`ab_${suffix}_${idx}`);
+                if (el) { el.value = d[key]; ab_pitches[idx][key] = d[key]; }
+            }
+        }
+
+        function syncAbPicker() {
+            if (ab_active_idx === null || ab_active_idx >= ab_pitches.length) return;
+            const pitch = ab_pitches[ab_active_idx];
+            const sz = 200;
+            const container = document.getElementById('ab_picker_svg');
+            container.innerHTML = buildPickerZoneSvg(sz, pitch.plate_x, pitch.plate_z);
+            attachAbPickerClick();
+        }
+
+        function attachAbPickerClick() {
+            const sz = 200;
+            const container = document.getElementById('ab_picker_svg');
+            const svg = container.querySelector('svg');
+            if (!svg) return;
+            svg.style.cursor = 'crosshair';
+            svg.addEventListener('click', (e) => {
+                if (ab_active_idx === null) return;
+                const rect = svg.getBoundingClientRect();
+                const svgX = (e.clientX - rect.left) * (sz / rect.width);
+                const svgY = (e.clientY - rect.top) * (sz / rect.height);
+                const coords = svgToPitch(svgX, svgY, sz);
+                const idx = ab_active_idx;
+                ab_pitches[idx].plate_x = parseFloat(coords.px.toFixed(1));
+                ab_pitches[idx].plate_z = parseFloat(coords.pz.toFixed(1));
+                // Sync input fields
+                const pxEl = document.getElementById(`ab_px_${idx}`);
+                const pzEl = document.getElementById(`ab_pz_${idx}`);
+                if (pxEl) pxEl.value = coords.px.toFixed(1);
+                if (pzEl) pzEl.value = coords.pz.toFixed(1);
+                syncAbPicker();
+            });
         }
 
         async function throwPitch(idx) {
@@ -936,9 +1038,13 @@
                 prev_pitch_result = ab_results[lastIdx]._outcome || 'FIRST_PITCH';
             }
 
-            // Disable the throw button
-            const btn = document.querySelector(`#ab_pitch_${idx} button`);
-            if (btn) { btn.disabled = true; btn.textContent = '...'; }
+            // Disable the throw button and all inputs in this row
+            const pitchCard = document.getElementById(`ab_pitch_${idx}`);
+            const btns = pitchCard.querySelectorAll('button');
+            btns.forEach(b => { b.disabled = true; });
+            const throwBtn = pitchCard.querySelector('button.secondary');
+            if (throwBtn) throwBtn.textContent = '...';
+            pitchCard.querySelectorAll('input, select').forEach(el => el.disabled = true);
 
             try {
                 const res = await fetch('/api/predict_demo', {
@@ -952,6 +1058,12 @@
                             release_speed: pitch.release_speed,
                             plate_x: pitch.plate_x,
                             plate_z: pitch.plate_z,
+                            release_spin_rate: pitch.spin || 2400,
+                            pfx_x: pitch.pfx_x != null ? pitch.pfx_x : -0.5,
+                            pfx_z: pitch.pfx_z != null ? pitch.pfx_z : 1.2,
+                            release_pos_x: pitch.rel_x != null ? pitch.rel_x : -1.5,
+                            release_pos_z: pitch.rel_z != null ? pitch.rel_z : 6.0,
+                            release_extension: pitch.ext != null ? pitch.ext : 6.3,
                             balls: ab_balls,
                             strikes: ab_strikes,
                             pitch_number: idx + 1,
@@ -983,8 +1095,8 @@
                     ab_over ? (ab_strikes >= 3 ? 'K' : ab_balls >= 4 ? 'BB' : 'In Play')
                             : `${ab_balls}-${ab_strikes}`;
 
-                // Update button
-                if (btn) { btn.textContent = outcome.replace(/_/g,' '); btn.style.fontSize = '0.7em'; }
+                // Update button text to show outcome
+                if (throwBtn) { throwBtn.textContent = outcome.replace(/_/g,' '); throwBtn.style.fontSize = '0.7em'; }
 
                 // Render compact card
                 renderCompactPitchCard(idx, data, outcome);
@@ -998,7 +1110,10 @@
 
             } catch (e) {
                 displayError('ab_pitch_results', e.message);
-                if (btn) { btn.disabled = false; btn.textContent = 'Throw'; }
+                // Re-enable on error
+                btns.forEach(b => { b.disabled = false; });
+                if (throwBtn) { throwBtn.textContent = 'Throw'; }
+                pitchCard.querySelectorAll('input, select').forEach(el => el.disabled = false);
             }
         }
 
@@ -1287,6 +1402,7 @@
             initDemoZonePicker();
             applyPitchTypeDefaults('demo');
             updateAbZone();
+            syncAbPicker();
         });
     </script>
 </body>
