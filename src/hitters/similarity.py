@@ -72,6 +72,7 @@ FAMILY_MATCH_WEIGHT = 0.7
 CROSS_FAMILY_WEIGHT = 0.3
 
 MIN_COUNT_MATCHES = 10  # fall back to cross-count if count slice is thinner than this
+MIN_SIMILARITY    = 0.01  # below this, the match is too distant to be meaningful
 
 # Recency weights — matches profiles.py PROFILE_RECENCY_WEIGHTS
 _RECENCY: dict = {2026: 3.0, 2025: 2.5, 2024: 2.0, 2023: 1.5, 2022: 1.0}
@@ -346,18 +347,18 @@ def find_similar_pitches(
     else:
         candidates = hitter_df
 
-    # Score all candidates and select top N
+    # Score all candidates, keep top N, then filter to meaningful matches
     sims = _score(candidates)
     top_idx = np.argsort(-sims)[:n_matches]
     top_df  = candidates.iloc[top_idx].copy()
     top_df["similarity_score"] = sims[top_idx]
-    top_df = top_df.reset_index(drop=True)
+    top_df = top_df[top_df["similarity_score"] >= MIN_SIMILARITY].reset_index(drop=True)
 
     n        = len(top_df)
     avg_sim  = float(top_df["similarity_score"].mean()) if n > 0 else 0.0
     confidence = min(1.0, n / 40) * avg_sim
 
-    # Empirical rates from matched pitches
+    # Empirical rates from meaningful matches only
     swing, contact, hard_hit, hit_rate, outcome_counts = _compute_empirical_rates(top_df)
 
     # Trim matched_pitches to display-relevant columns

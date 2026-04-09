@@ -1,0 +1,11 @@
+{
+  "swing_auc": 0.8836,
+  "swing_rate": 0.4725,
+  "contact_auc": 0.8098,
+  "contact_rate": 0.7716,
+  "hard_contact_auc": 0.7306,
+  "hard_contact_rate": 0.3687,
+  "train_cutoff": "2026-01-01",
+  "val_cutoff": "2025-01-01",
+  "profile_cutoff": "2026-01-01"
+}

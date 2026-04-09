@@ -9,6 +9,7 @@ Usage:
     python -m src.demo.at_bat
 """
 
+import random
 import sys
 from datetime import date
 from pathlib import Path
@@ -17,84 +18,66 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.model.predict import predict_pitch, interpret_pitch
+from src.utils.pitch_helpers import PITCH_DEFAULTS, location_tag
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Outcome simulation (count progression only — rough heuristic)
+# Strike zone check
+# ──────────────────────────────────────────────────────────────────────────────
+
+_SZ_X = 0.85   # half-width of strike zone in feet
+_SZ_Z_LO = 1.5
+_SZ_Z_HI = 3.5
+
+
+def _is_in_zone(plate_x: float, plate_z: float) -> bool:
+    return abs(plate_x) < _SZ_X and _SZ_Z_LO < plate_z < _SZ_Z_HI
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Outcome simulation (stochastic, with count advancement)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _simulate_outcome(
-    p_swing: float, p_contact_given_swing: float, balls: int, strikes: int
+    p_swing: float,
+    p_contact_given_swing: float,
+    p_hard_given_contact: float,
+    plate_x: float,
+    plate_z: float,
+    balls: int,
+    strikes: int,
 ) -> tuple:
     """
-    Simulate a pitch outcome label and advance the count.
+    Stochastically simulate a pitch outcome and advance the count.
     Returns (result_label, new_balls, new_strikes, at_bat_over).
     """
-    if p_swing < 0.25:
-        # Hitter likely takes it
-        if strikes < 2:
-            return "called_strike", balls, strikes + 1, False
+    if random.random() >= p_swing:
+        # Hitter takes — called strike or ball depends on location
+        if _is_in_zone(plate_x, plate_z):
+            s = strikes + 1
+            return "called_strike", balls, s, s >= 3
         else:
-            return "ball", balls + 1, strikes, balls + 1 == 4
-    else:
-        # Hitter swings
-        if p_contact_given_swing < 0.40:
-            # Whiff
-            if strikes < 2:
-                return "swinging_strike", balls, strikes + 1, False
-            else:
-                return "swinging_strike", balls, 3, True  # strikeout
-        else:
-            # Contact made
-            if strikes < 2:
-                return "foul", balls, min(strikes + 1, 2), False
-            else:
-                return "hit_into_play", balls, 2, True
+            b = balls + 1
+            return "ball", b, strikes, b >= 4
 
+    # Hitter swings
+    if random.random() >= p_contact_given_swing:
+        # Whiff
+        s = strikes + 1
+        return "swinging_strike", balls, s, s >= 3
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Location tag helper
-# ──────────────────────────────────────────────────────────────────────────────
+    # Contact made — hard or soft?
+    if random.random() < p_hard_given_contact:
+        return "hit_into_play", balls, strikes, True
 
-def _location_tag(plate_x: float, plate_z: float) -> str:
-    """Human-readable zone label from catcher's perspective."""
-    if plate_z > 3.2:
-        vert = "elevated"
-    elif plate_z > 2.6:
-        vert = "mid"
-    elif plate_z > 1.8:
-        vert = "low"
-    else:
-        vert = "below zone"
-
-    if plate_x > 0.85:
-        horiz = "off plate away"
-    elif plate_x > 0.4:
-        horiz = "away"
-    elif plate_x > -0.4:
-        horiz = "middle"
-    elif plate_x > -0.85:
-        horiz = "in"
-    else:
-        horiz = "off plate in"
-
-    if horiz == "middle":
-        return vert
-    return f"{vert}-{horiz}"
+    # Soft contact → foul (cannot advance past 2 strikes)
+    s = min(strikes + 1, 2)
+    return "foul", balls, s, False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Core simulator
 # ──────────────────────────────────────────────────────────────────────────────
-
-_PITCH_DEFAULTS = {
-    "release_spin_rate": 2400.0,
-    "pfx_x":             -0.5,
-    "pfx_z":              1.2,
-    "release_pos_x":     -1.5,
-    "release_pos_z":      6.0,
-    "release_extension":  6.3,
-}
 
 
 def simulate_at_bat(
@@ -115,7 +98,7 @@ def simulate_at_bat(
         pitcher_arsenal: ordered list of pitch dicts, each containing at minimum:
             release_speed, pitch_type, plate_x, plate_z
             Optional: release_spin_rate, pfx_x, pfx_z, release_pos_x/z,
-                      release_extension (defaults filled from _PITCH_DEFAULTS)
+                      release_extension (defaults filled from PITCH_DEFAULTS)
         hitter_name:  player name string (e.g. "Shohei Ohtani")
         p_throws:     pitcher handedness "R" or "L"
         on_1b/2b/3b:  baserunner flags (None = empty)
@@ -151,7 +134,7 @@ def simulate_at_bat(
     for i, raw_pitch in enumerate(pitcher_arsenal):
         pitch_num = i + 1
 
-        pitch = {**_PITCH_DEFAULTS, **raw_pitch}
+        pitch = {**PITCH_DEFAULTS, **raw_pitch}
         pitch.update({
             "balls":             balls,
             "strikes":           strikes,
@@ -176,7 +159,7 @@ def simulate_at_bat(
 
         px = raw_pitch.get("plate_x", pitch["plate_x"])
         pz = raw_pitch.get("plate_z", pitch["plate_z"])
-        loc_tag   = _location_tag(px, pz)
+        loc_tag   = location_tag(px, pz)
         quality   = result["pitch_quality"]
         count_str = f"{balls}-{strikes}"
 
@@ -190,7 +173,7 @@ def simulate_at_bat(
             )
 
         outcome, balls, strikes, ab_over = _simulate_outcome(
-            p_swing, p_contact_given_sw, balls, strikes
+            p_swing, p_contact_given_sw, p_hard_given_con, px, pz, balls, strikes
         )
 
         prev_pitch_type   = pitch["pitch_type"]
@@ -290,6 +273,7 @@ _ARSENAL = [
 ]
 
 if __name__ == "__main__":
+    random.seed(42)
     SEP = "═" * 70
 
     print(SEP)

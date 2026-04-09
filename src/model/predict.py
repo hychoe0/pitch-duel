@@ -84,13 +84,18 @@ def load_models(model_dir: Path = MODEL_DIR) -> tuple:
 
     Returns: (swing_pair, contact_pair, hard_contact_pair, feature_cols, encodings)
     where each pair is (XGBClassifier, IsotonicRegression | None).
+
+    Cache is keyed by model_dir so multiple model versions can coexist.
     """
-    if _cache:
+    cache_key = str(model_dir.resolve())
+    if cache_key in _cache:
+        c = _cache[cache_key]
         return (
-            _cache["swing"], _cache["contact"], _cache["hard_contact"],
-            _cache["feature_cols"], _cache["encodings"],
+            c["swing"], c["contact"], c["hard_contact"],
+            c["feature_cols"], c["encodings"],
         )
 
+    entry = {}
     stages = ["swing", "contact", "hard_contact"]
     for stage in stages:
         model_path = model_dir / f"{stage}_model.json"
@@ -103,19 +108,18 @@ def load_models(model_dir: Path = MODEL_DIR) -> tuple:
 
         cal_path = model_dir / f"{stage}_calibrator.pkl"
         calibrator = joblib.load(cal_path) if cal_path.exists() else None
-        _cache[stage] = (model, calibrator)
+        entry[stage] = (model, calibrator)
 
     with open(model_dir / "feature_cols.json") as f:
-        feature_cols = json.load(f)
+        entry["feature_cols"] = json.load(f)
     with open(model_dir / "encodings.json") as f:
-        encodings = json.load(f)
+        entry["encodings"] = json.load(f)
 
-    _cache["feature_cols"] = feature_cols
-    _cache["encodings"] = encodings
+    _cache[cache_key] = entry
 
     return (
-        _cache["swing"], _cache["contact"], _cache["hard_contact"],
-        feature_cols, encodings,
+        entry["swing"], entry["contact"], entry["hard_contact"],
+        entry["feature_cols"], entry["encodings"],
     )
 
 

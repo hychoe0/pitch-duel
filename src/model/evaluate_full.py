@@ -6,6 +6,7 @@ Sections:
   B  Hitter differentiation (do probabilities differ across hitters?)
   C  Calibration / range checks on test set sample
   D  Demo readiness checklist
+  E  Combined prediction validation (model + historical blend)
 
 Run from the pitch_duel project root:
     python -m src.model.evaluate_full
@@ -398,23 +399,260 @@ def section_c() -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Section E — Combined Prediction Validation
+# ──────────────────────────────────────────────────────────────────────────────
+
+def section_e() -> dict:
+    from src.model.predict_combined import predict_matchup
+
+    print("\n" + "═" * 70)
+    print("SECTION E — COMBINED PREDICTION VALIDATION (model + history blend)")
+    print("═" * 70)
+
+    results = {}
+
+    # ── E.1  Blend weight sanity ──────────────────────────────────────────────
+    print("\nE.1  Blend Weight Sanity — alpha for common vs rare pitches")
+
+    ff_center = dict(BASE_PITCH)
+    ff_center["release_speed"] = 95.0
+    ff_result = predict_matchup(ff_center, "Shohei Ohtani")
+
+    eephus = dict(BASE_PITCH)
+    eephus.update({"pitch_type": "EP", "release_speed": 78.0,
+                   "release_spin_rate": 1000.0, "pfx_x": 0.1, "pfx_z": 0.3})
+    ep_result = predict_matchup(eephus, "Shohei Ohtani")
+
+    print(f"  95 mph FF center-cut: alpha={ff_result.alpha:.4f}  "
+          f"(n={ff_result.n_similar_pitches}, conf={ff_result.confidence:.4f})")
+    print(f"  78 mph EP (eephus):   alpha={ep_result.alpha:.4f}  "
+          f"(n={ep_result.n_similar_pitches}, conf={ep_result.confidence:.4f})")
+
+    ff_ok = ff_result.alpha > 0.15
+    ep_ok = ep_result.alpha < 0.15
+    pass_e1 = ff_ok and ep_ok
+    results["e1"] = pass_e1
+    print(f"  → {'PASS' if pass_e1 else 'FAIL'}: "
+          f"FF alpha {'>' if ff_ok else 'NOT >'} 0.15, "
+          f"EP alpha {'<' if ep_ok else 'NOT <'} 0.15")
+
+    # ── E.2  Model vs history agreement ───────────────────────────────────────
+    print("\nE.2  Model vs History Agreement — correlation across hitters × pitch types")
+
+    e2_hitters = [
+        "Shohei Ohtani", "Freddie Freeman", "Aaron Judge",
+    ]
+    # Use Hamilton and Hendricks only if profiles exist
+    for name in ["Hamilton, Billy", "Hendricks, Kyle"]:
+        try:
+            predict_matchup(dict(BASE_PITCH), name)
+            e2_hitters.append(name)
+        except Exception:
+            pass
+
+    e2_pitches = [
+        ("FF", 95.0), ("SL", 87.0), ("CH", 85.0),
+    ]
+
+    all_model, all_hist, all_has_history = [], [], []
+    excluded_hitters = set()
+    print(f"  {'Hitter':<22} {'Type':>4} {'Model':>7} {'History':>8} {'Blend':>7} {'alpha':>6}  {'':>6}")
+    for hitter in e2_hitters:
+        for pt, spd in e2_pitches:
+            p = dict(BASE_PITCH)
+            p.update({"pitch_type": pt, "release_speed": spd})
+            try:
+                mr = predict_matchup(p, hitter)
+            except Exception:
+                continue
+            has_hist = mr.n_similar_pitches > 0
+            all_model.append(mr.model_p_hard)
+            all_hist.append(mr.historical_p_hard)
+            all_has_history.append(has_hist)
+            if not has_hist:
+                excluded_hitters.add(hitter)
+            short_name = hitter.split(",")[0] if "," in hitter else hitter.split()[-1]
+            tag = "" if has_hist else "  (no history)"
+            print(f"  {short_name:<22} {pt:>4} {mr.model_p_hard:>7.4f} "
+                  f"{mr.historical_p_hard:>8.4f} {mr.p_hard:>7.4f} {mr.alpha:>6.3f}{tag}")
+
+    # Filter to hitters with actual historical data for the correlation
+    filt_model = [m for m, h in zip(all_model, all_has_history) if h]
+    filt_hist  = [h for h, has in zip(all_hist, all_has_history) if has]
+
+    if excluded_hitters:
+        print(f"\n  Excluded from correlation (0 similar pitches): "
+              f"{', '.join(sorted(excluded_hitters))}")
+
+    if len(filt_model) >= 4:
+        corr_filt = float(np.corrcoef(filt_model, filt_hist)[0, 1])
+        # Also report unfiltered for transparency
+        if len(all_model) > len(filt_model):
+            corr_all = float(np.corrcoef(all_model, all_hist)[0, 1])
+            print(f"  Pearson r (all):      {corr_all:.4f}  (includes history=0 points)")
+        print(f"  Pearson r (filtered): {corr_filt:.4f}  ({len(filt_model)} points with history)")
+        pass_e2 = corr_filt > 0.3
+        results["e2"] = pass_e2
+        print(f"  → {'PASS' if pass_e2 else 'FAIL'}: r {'>' if pass_e2 else 'NOT >'} 0.3")
+    else:
+        results["e2"] = False
+        print(f"\n  Too few data points with history ({len(filt_model)}) — cannot compute correlation")
+        print(f"  → FAIL: insufficient data")
+
+    # ── E.3  Blend should not be worse than model-only ────────────────────────
+    print("\nE.3  Blend vs Model-Only — MAE on test-set sample")
+    from src.hitters.similarity import find_similar_pitches
+
+    try:
+        test_df = pd.read_parquet(TEST_PARQUET, columns=[
+            "batter", "game_date", "pitch_type", "release_speed",
+            "pfx_x", "pfx_z", "plate_x", "plate_z",
+            "release_spin_rate", "release_extension", "release_pos_x", "release_pos_z",
+            "balls", "strikes", "pitch_number", "description", "events",
+            "launch_speed", "p_throws",
+            "prev_pitch_type", "prev_pitch_speed", "prev_pitch_result",
+            "on_1b", "on_2b", "on_3b", "inning", "score_diff",
+        ])
+        test_df["game_date"] = pd.to_datetime(test_df["game_date"])
+
+        # Sample a manageable subset: frequent batters with enough history
+        batter_counts = test_df["batter"].value_counts()
+        frequent_batters = batter_counts[batter_counts >= 200].index[:10]
+        sample = test_df[test_df["batter"].isin(frequent_batters)].sample(
+            n=min(200, len(test_df[test_df["batter"].isin(frequent_batters)])),
+            random_state=42,
+        )
+
+        from src.data.preprocess import SWING_DESCRIPTIONS, CONTACT_DESCRIPTIONS, IN_PLAY_DESCRIPTIONS
+
+        model_errors, blend_errors = [], []
+        n_evaluated = 0
+
+        for _, row in sample.iterrows():
+            # Compute actual outcome: was it hard contact? (binary 0/1)
+            is_swing = row["description"] in SWING_DESCRIPTIONS
+            is_contact = row["description"] in CONTACT_DESCRIPTIONS
+            is_in_play = row["description"] in IN_PLAY_DESCRIPTIONS
+            is_hard = is_in_play and (row.get("launch_speed") or 0) >= 95
+            actual_hard = float(is_swing and is_contact and is_hard)
+
+            pitch_dict = {
+                "pitch_type": row["pitch_type"],
+                "release_speed": row["release_speed"],
+                "plate_x": row["plate_x"],
+                "plate_z": row["plate_z"],
+                "pfx_x": row.get("pfx_x", 0) or 0,
+                "pfx_z": row.get("pfx_z", 0) or 0,
+                "release_spin_rate": row.get("release_spin_rate", 0) or 0,
+                "release_pos_x": row.get("release_pos_x", 0) or 0,
+                "release_pos_z": row.get("release_pos_z", 0) or 0,
+                "release_extension": row.get("release_extension", 0) or 0,
+                "balls": int(row["balls"]),
+                "strikes": int(row["strikes"]),
+                "pitch_number": int(row["pitch_number"]),
+                "prev_pitch_type": row.get("prev_pitch_type", "FIRST_PITCH") or "FIRST_PITCH",
+                "prev_pitch_speed": row.get("prev_pitch_speed", 0) or 0,
+                "prev_pitch_result": row.get("prev_pitch_result", "FIRST_PITCH") or "FIRST_PITCH",
+                "on_1b": row.get("on_1b"),
+                "on_2b": row.get("on_2b"),
+                "on_3b": row.get("on_3b"),
+                "inning": int(row.get("inning", 1)),
+                "score_diff": int(row.get("score_diff", 0)),
+                "p_throws": row.get("p_throws", "R"),
+            }
+
+            batter_id = int(row["batter"])
+            profile = _get_profile(batter_id)
+            hitter_name = profile.player_name or f"Player {batter_id}"
+
+            try:
+                mr = predict_matchup(pitch_dict, hitter_name, show_evidence=False)
+            except Exception:
+                continue
+
+            model_errors.append(abs(mr.model_p_hard - actual_hard))
+            blend_errors.append(abs(mr.p_hard - actual_hard))
+            n_evaluated += 1
+
+        if n_evaluated >= 20:
+            model_mae = float(np.mean(model_errors))
+            blend_mae = float(np.mean(blend_errors))
+            # Allow 0.001 tolerance — with low alpha the blend is essentially neutral,
+            # and float rounding can push MAE either way by tiny amounts.
+            pass_e3 = blend_mae <= model_mae + 0.001
+            results["e3"] = pass_e3
+            print(f"  Evaluated {n_evaluated} pitches")
+            print(f"  Model-only MAE: {model_mae:.4f}")
+            print(f"  Blended MAE:    {blend_mae:.4f}")
+            delta = model_mae - blend_mae
+            print(f"  Improvement:    {delta:+.4f}")
+            print(f"  → {'PASS' if pass_e3 else 'FAIL'}: blended MAE "
+                  f"{'≤' if pass_e3 else '>'} model-only MAE (within 0.001 tolerance)")
+        else:
+            results["e3"] = False
+            print(f"  Only {n_evaluated} pitches evaluated — insufficient data")
+            print(f"  → FAIL: need ≥20 evaluated pitches")
+
+    except Exception as e:
+        results["e3"] = False
+        print(f"  ERROR: {e}")
+        print(f"  → FAIL: could not run test-set evaluation")
+
+    # ── E.4  International pitcher use case (alpha = 0) ───────────────────────
+    print("\nE.4  Unknown Hitter Fallback — alpha should be 0 (pure model)")
+
+    fake_pitch = dict(BASE_PITCH)
+
+    try:
+        mr_fake = predict_matchup(fake_pitch, "Fakeplayer Doesnotexist")
+        alpha_zero = mr_fake.alpha == 0.0
+        # Model output should match the league-average-profile prediction
+        # (the fake hitter gets league-average profile in both paths)
+        model_match = (
+            abs(mr_fake.p_swing - mr_fake.model_p_swing) < 1e-6
+            and abs(mr_fake.p_contact - mr_fake.model_p_contact) < 1e-6
+            and abs(mr_fake.p_hard_contact - mr_fake.model_p_hard_contact) < 1e-6
+        )
+        pass_e4 = alpha_zero and model_match
+        results["e4"] = pass_e4
+        print(f"  Fake hitter: alpha={mr_fake.alpha:.4f}, "
+              f"n_matches={mr_fake.n_similar_pitches}")
+        print(f"  Blended == Model: p_swing={mr_fake.p_swing:.4f} vs {mr_fake.model_p_swing:.4f}, "
+              f"p_con={mr_fake.p_contact:.4f} vs {mr_fake.model_p_contact:.4f}, "
+              f"p_hard={mr_fake.p_hard_contact:.4f} vs {mr_fake.model_p_hard_contact:.4f}")
+        print(f"  → {'PASS' if pass_e4 else 'FAIL'}: "
+              f"alpha {'== 0' if alpha_zero else '!= 0'}, "
+              f"blended {'==' if model_match else '!='} model")
+    except Exception as e:
+        results["e4"] = False
+        print(f"  ERROR: {e}")
+        print(f"  → FAIL: predict_matchup raised an exception for fake hitter")
+
+    return results
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Section D — Demo Readiness Checklist
 # ──────────────────────────────────────────────────────────────────────────────
 
-def section_d(a_results: dict, b_results: dict, c_results: dict) -> None:
+def section_d(a_results: dict, b_results: dict, c_results: dict, e_results: dict) -> None:
     print("\n" + "═" * 70)
     print("SECTION D — DEMO READINESS CHECKLIST")
     print("═" * 70)
 
     checks = [
-        ("P(contact|sw) decreases w/ velocity?", "A.1 — velocity gradient",    a_results.get("a1", False)),
-        ("P(swing) highest in zone?",            "A.2 — location gradient",    a_results.get("a2", False)),
-        ("P(hard) higher in hitter counts?",      "A.3 — count damage leverage", a_results.get("a3", False)),
-        ("P(contact|sw) differs by pitch type?", "A.4 — pitch type spread",    a_results.get("a4", False)),
-        ("P(hard) differs across hitters?",      "B   — elite vs weak spread", b_results.get("b", False)),
-        ("Probabilities in valid range?",        "C.1 — [0,1] + meaningful",   c_results.get("c1", False)),
-        ("P(hard) composite higher in 2-0 vs 0-2?", "C.2 — count damage sanity",  c_results.get("c2", False)),
-        ("Ohtani P(hard) > Hamilton P(hard)?",   "C.3 — hitter split",         c_results.get("c3", False)),
+        ("P(contact|sw) decreases w/ velocity?",    "A.1 — velocity gradient",     a_results.get("a1", False)),
+        ("P(swing) highest in zone?",                "A.2 — location gradient",     a_results.get("a2", False)),
+        ("P(hard) higher in hitter counts?",         "A.3 — count damage leverage", a_results.get("a3", False)),
+        ("P(contact|sw) differs by pitch type?",     "A.4 — pitch type spread",     a_results.get("a4", False)),
+        ("P(hard) differs across hitters?",          "B   — elite vs weak spread",  b_results.get("b", False)),
+        ("Probabilities in valid range?",            "C.1 — [0,1] + meaningful",    c_results.get("c1", False)),
+        ("P(hard) composite higher in 2-0 vs 0-2?", "C.2 — count damage sanity",   c_results.get("c2", False)),
+        ("Ohtani P(hard) > Hamilton P(hard)?",       "C.3 — hitter split",          c_results.get("c3", False)),
+        ("Blend alpha sane (high FF, low EP)?",      "E.1 — blend weight sanity",   e_results.get("e1", False)),
+        ("Model & history broadly agree?",           "E.2 — correlation > 0.3",     e_results.get("e2", False)),
+        ("Blend not worse than model-only?",         "E.3 — MAE comparison",        e_results.get("e3", False)),
+        ("Unknown hitter → pure model?",             "E.4 — alpha=0 fallback",      e_results.get("e4", False)),
     ]
 
     print(f"\n  {'Check':<42}  {'Section':<28}  {'Result':>6}")
@@ -463,7 +701,8 @@ def main():
     a_results = section_a()
     b_results = section_b()
     c_results = section_c()
-    section_d(a_results, b_results, c_results)
+    e_results = section_e()
+    section_d(a_results, b_results, c_results, e_results)
 
 
 if __name__ == "__main__":

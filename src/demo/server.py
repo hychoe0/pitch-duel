@@ -17,13 +17,64 @@ import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, request, render_template
 
-from src.model.predict import predict_pitch
+from src.model.predict import predict_pitch, load_models, encode_pitch_dict, build_feature_row
+from src.model.predict_combined import predict_matchup
 from src.demo.at_bat import simulate_at_bat
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIR = ROOT / "data" / "processed" / "profiles"
+MODEL_DIR = ROOT / "models"
+MODEL_V2_DIR = ROOT / "models_v2"
+
+# Model version registry
+MODEL_VERSIONS = {
+    "v1": {
+        "model_dir": MODEL_DIR,
+        "label": "v1 (train 2015-2024, test 2025+)",
+    },
+    "v2": {
+        "model_dir": MODEL_V2_DIR,
+        "label": "v2 (train 2015-2025, predict 2026)",
+    },
+}
 
 app = Flask(__name__, template_folder=ROOT / "src" / "demo" / "templates")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Model directory resolution
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _resolve_model_dir(version: str = None) -> Path:
+    """Resolve model directory from version string. Falls back to v1."""
+    if version and version in MODEL_VERSIONS:
+        d = MODEL_VERSIONS[version]["model_dir"]
+        if d.exists():
+            return d
+    return MODEL_DIR
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Feature importances (cached per model directory)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_IMPORTANCES_CACHE = {}
+
+
+def _load_importances(model_dir: Path = None):
+    if model_dir is None:
+        model_dir = MODEL_DIR
+    cache_key = str(model_dir.resolve())
+    if cache_key in _IMPORTANCES_CACHE:
+        return _IMPORTANCES_CACHE[cache_key]
+
+    swing_pair, contact_pair, hc_pair, feature_cols, encodings = load_models(model_dir)
+    result = {}
+    for stage_name, (model, _cal) in [("swing", swing_pair), ("contact", contact_pair), ("hard_contact", hc_pair)]:
+        imp = model.feature_importances_
+        result[stage_name] = {col: round(float(v), 5) for col, v in zip(feature_cols, imp)}
+    _IMPORTANCES_CACHE[cache_key] = result
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -101,6 +152,20 @@ def hitters():
     return jsonify({"hitters": load_hitters()})
 
 
+@app.route("/api/models", methods=["GET"])
+def list_models():
+    """Return available model versions and which ones are ready (trained)."""
+    versions = []
+    for ver, info in MODEL_VERSIONS.items():
+        ready = (info["model_dir"] / "swing_model.json").exists()
+        versions.append({
+            "version": ver,
+            "label": info["label"],
+            "ready": ready,
+        })
+    return jsonify({"models": versions})
+
+
 @app.route("/predict", methods=["POST"])
 def predict():
     """
@@ -176,6 +241,191 @@ def predict():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/predict_demo", methods=["POST"])
+def predict_demo():
+    """
+    Full pipeline prediction with transparent breakdown.
+
+    Returns per-stage model drivers, historical evidence, blend computation,
+    hitter profile highlights, and final verdict — everything needed for
+    the Prediction Demo tab to show every step of the pipeline.
+    """
+    try:
+        data = request.get_json()
+        hitter_name    = data.get("hitter_name")
+        pitch_dict     = data.get("pitch", {})
+        model_version  = data.get("model_version", "v1")
+
+        model_dir = _resolve_model_dir(model_version)
+
+        defaults = {
+            "release_spin_rate": 2400.0,
+            "pfx_x": -0.5, "pfx_z": 1.2,
+            "release_pos_x": -1.5, "release_pos_z": 6.0, "release_extension": 6.3,
+            "pitch_number": 1,
+            "prev_pitch_type": "FIRST_PITCH", "prev_pitch_speed": 0.0,
+            "prev_pitch_result": "FIRST_PITCH",
+            "on_1b": None, "on_2b": None, "on_3b": None,
+            "inning": 1, "score_diff": 0, "p_throws": "R",
+            "game_date": date.today().isoformat(),
+        }
+        for k, v in defaults.items():
+            if k not in pitch_dict:
+                pitch_dict[k] = v
+
+        # Run blended prediction (model + historical similarity)
+        mr = predict_matchup(pitch_dict, hitter_name, model_dir=model_dir, show_evidence=True)
+
+        # Load hitter profile for display
+        hitter_profile = _load_hitter_profile_for_display(hitter_name)
+
+        # Get feature importances and top drivers per stage
+        importances = _load_importances(model_dir)
+        stage_drivers = {}
+        for stage_name in ["swing", "contact", "hard_contact"]:
+            stage_imp = importances[stage_name]
+            # Sort by importance, take top 8
+            sorted_feats = sorted(stage_imp.items(), key=lambda x: -x[1])[:8]
+            stage_drivers[stage_name] = [
+                {"feature": feat, "importance": imp}
+                for feat, imp in sorted_feats
+            ]
+
+        # Build input features summary
+        input_features = {
+            "pitch_type": pitch_dict.get("pitch_type", "FF"),
+            "release_speed": pitch_dict.get("release_speed", 0),
+            "plate_x": round(float(pitch_dict.get("plate_x", 0)), 2),
+            "plate_z": round(float(pitch_dict.get("plate_z", 2.5)), 2),
+            "release_spin_rate": pitch_dict.get("release_spin_rate", 0),
+            "pfx_x": pitch_dict.get("pfx_x", 0),
+            "pfx_z": pitch_dict.get("pfx_z", 0),
+            "release_extension": pitch_dict.get("release_extension", 0),
+            "balls": pitch_dict.get("balls", 0),
+            "strikes": pitch_dict.get("strikes", 0),
+            "count": f"{pitch_dict.get('balls', 0)}-{pitch_dict.get('strikes', 0)}",
+        }
+
+        # Danger level
+        p_hard = mr.p_hard
+        if p_hard >= 0.35:
+            danger = "HIGH DANGER"
+        elif p_hard >= 0.15:
+            danger = "MODERATE"
+        else:
+            danger = "LOW DANGER"
+
+        zone = classify_pitch_zone(
+            float(pitch_dict.get("plate_x", 0)),
+            float(pitch_dict.get("plate_z", 2.5)),
+        )
+        color = _stage_quality_color(p_hard, zone)
+
+        response = {
+            "input_features": input_features,
+            "model_version": model_version,
+            "model_label": MODEL_VERSIONS.get(model_version, {}).get("label", "unknown"),
+            "hitter": hitter_name,
+            "hitter_profile": hitter_profile,
+
+            # Path A: Model predictions
+            "model": {
+                "p_swing": round(mr.model_p_swing, 4),
+                "p_contact": round(mr.model_p_contact, 4),
+                "p_hard_contact": round(mr.model_p_hard_contact, 4),
+                "p_hard": round(mr.model_p_hard, 4),
+                "stage_drivers": stage_drivers,
+            },
+
+            # Path B: Historical similarity
+            "historical": {
+                "swing_rate": round(mr.historical_swing_rate, 4),
+                "contact_rate": round(mr.historical_contact_rate, 4),
+                "hard_hit_rate": round(mr.historical_hard_hit_rate, 4),
+                "p_hard": round(mr.historical_p_hard, 4),
+                "n_similar": mr.n_similar_pitches,
+                "confidence": round(mr.confidence, 4),
+                "top_pitches": mr.top_similar_pitches,
+                "outcome_distribution": mr.outcome_distribution,
+            },
+
+            # Blend
+            "blend": {
+                "alpha": round(mr.alpha, 4),
+                "p_swing": round(mr.p_swing, 4),
+                "p_contact": round(mr.p_contact, 4),
+                "p_hard_contact": round(mr.p_hard_contact, 4),
+                "p_hard": round(mr.p_hard, 4),
+            },
+
+            # Verdict
+            "verdict": {
+                "danger_level": danger,
+                "zone": zone,
+                "quality_color": color,
+                "pitch_quality": mr.pitch_type,
+                "summary": _verdict_text(mr, danger),
+            },
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 400
+
+
+def _load_hitter_profile_for_display(hitter_name: str) -> dict:
+    """Load hitter profile summary for frontend display."""
+    from src.hitters.profiles import get_player_id, load_profile
+
+    try:
+        df = pd.read_parquet(
+            ROOT / "data" / "processed" / "statcast_processed.parquet",
+            columns=["batter", "player_name"],
+        )
+        pid = get_player_id(hitter_name, df)
+        profile = load_profile(pid, PROFILE_DIR)
+        return {
+            "player_name": profile.player_name,
+            "swing_rate": round(profile.swing_rate, 3),
+            "chase_rate": round(profile.chase_rate, 3),
+            "contact_rate": round(profile.contact_rate, 3),
+            "hard_hit_rate": round(profile.hard_hit_rate, 3),
+            "whiff_rate": round(profile.whiff_rate, 3),
+            "sample_size": profile.sample_size,
+            "is_thin_sample": profile.is_thin_sample,
+        }
+    except (FileNotFoundError, ValueError):
+        return {
+            "player_name": hitter_name,
+            "swing_rate": 0.47, "chase_rate": 0.29,
+            "contact_rate": 0.72, "hard_hit_rate": 0.35,
+            "whiff_rate": 0.25, "sample_size": 0,
+            "is_thin_sample": True,
+        }
+
+
+def _verdict_text(mr, danger: str) -> str:
+    """Generate a coach-readable verdict string."""
+    if danger == "HIGH DANGER":
+        return (
+            f"This {mr.pitch_type} is dangerous vs {mr.hitter}. "
+            f"P(hard contact) = {mr.p_hard:.1%} — expect damage."
+        )
+    elif danger == "MODERATE":
+        return (
+            f"Competitive pitch vs {mr.hitter}. "
+            f"P(hard contact) = {mr.p_hard:.1%} — manageable but not safe."
+        )
+    else:
+        return (
+            f"Strong pitch vs {mr.hitter}. "
+            f"P(hard contact) = {mr.p_hard:.1%} — low damage expected."
+        )
 
 
 @app.route("/at_bat", methods=["POST"])
@@ -583,7 +833,6 @@ def _resolve_hitter_name(batter_id: int) -> str:
 
 
 if __name__ == "__main__":
-    # Port 5000 is reserved by macOS AirPlay Receiver — use 5001.
     print("Starting Pitch Duel web interface...")
-    print("Open http://localhost:5001 in your browser")
-    app.run(debug=True, port=5001)
+    print("Open http://localhost:5050 in your browser")
+    app.run(debug=True, port=5050)
