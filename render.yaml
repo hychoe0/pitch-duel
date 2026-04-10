@@ -2,7 +2,7 @@ services:
   - type: web
     name: pitch-duel
     runtime: python
-    buildCommand: pip install -r requirements-deploy.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: gunicorn src.demo.server:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1
     envVars:
       - key: PITCH_DUEL_PROFILES
