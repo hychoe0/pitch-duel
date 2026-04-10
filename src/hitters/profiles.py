@@ -129,7 +129,7 @@ def _weighted_pa_count(df: pd.DataFrame) -> float:
 class HitterProfile:
     player_id: int
     player_name: str
-    stand: str                       # 'L' or 'R'
+    stand: str                       # 'L', 'R', or 'S' (switch)
     swing_rate: float
     chase_rate: float
     contact_rate: float
@@ -447,7 +447,14 @@ def build_profile(
     # NOTE: player_name in Statcast rows is the PITCHER's name, not the batter's.
     name = _NAME_CACHE.get(player_id, f"Player {player_id}")
 
-    stand = sub["stand"].mode().iloc[0] if len(sub) > 0 else "R"
+    if len(sub) > 0:
+        stand_counts = sub["stand"].value_counts()
+        if len(stand_counts) > 1 and stand_counts.min() / stand_counts.sum() >= 0.10:
+            stand = "S"  # switch hitter
+        else:
+            stand = stand_counts.index[0]
+    else:
+        stand = "R"
     n = len(sub)
 
     w = _row_weights(sub) if n > 0 else np.array([])
@@ -598,7 +605,14 @@ def merge_profiles_into_df(
         from src.data.preprocess import identify_pitcher_batters
         pitcher_batter_ids = identify_pitcher_batters(df)
 
-    unique_batters = df["batter"].unique()
+    # Filter to batters active in 2022+ (excludes retired players, pre-DH NL pitchers)
+    all_batters = df["batter"].unique()
+    active_cutoff = pd.Timestamp("2022-01-01")
+    active_batters = set(df[df["game_date"] >= active_cutoff]["batter"].unique())
+    unique_batters = np.array([b for b in all_batters if b in active_batters])
+    n_filtered = len(all_batters) - len(unique_batters)
+    print(f"Kept {len(unique_batters):,} active hitters, skipped {n_filtered:,} retired/inactive (no PA since 2022)")
+
     n_skipped = sum(1 for pid in unique_batters if pid in pitcher_batter_ids)
     print(
         f"Building profiles for {len(unique_batters):,} unique batters "

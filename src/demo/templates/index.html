@@ -175,7 +175,14 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Hitter Name</label>
-                        <select id="hitter_demo" required><option>Loading...</option></select>
+                        <select id="hitter_demo" required onchange="syncDemoZone()"><option>Loading...</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Pitcher Throws</label>
+                        <select id="p_throws_demo" onchange="syncDemoZone()">
+                            <option value="R">Right</option>
+                            <option value="L">Left</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label>Pitch Type</label>
@@ -214,7 +221,7 @@
                 <!-- Interactive strike zone for location picking -->
                 <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:15px;">
                     <div>
-                        <label style="margin-bottom:8px;">Click to set pitch location:</label>
+                        <label style="margin-bottom:8px;">Click to set pitch location <span style="color:#484f58;font-size:0.85em;">(pitcher's view)</span>:</label>
                         <div id="demo_zone_picker" style="cursor:crosshair;"></div>
                     </div>
                     <div style="flex:1;">
@@ -272,11 +279,11 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Hitter Name</label>
-                        <select id="hitter_atbat" required><option>Loading...</option></select>
+                        <select id="hitter_atbat" required onchange="syncAbPicker()"><option>Loading...</option></select>
                     </div>
                     <div class="form-group">
                         <label>Pitcher Throws</label>
-                        <select id="p_throws_atbat">
+                        <select id="p_throws_atbat" onchange="syncAbPicker()">
                             <option value="R">Right</option>
                             <option value="L">Left</option>
                         </select>
@@ -295,7 +302,7 @@
                         </div>
                     </div>
                     <div>
-                        <label style="margin-bottom:8px;display:block;">Click to set location:</label>
+                        <label style="margin-bottom:8px;display:block;">Click to set location <span style="color:#484f58;font-size:0.85em;">(pitcher's view)</span>:</label>
                         <div id="ab_picker_svg" style="cursor:crosshair;"></div>
                         <div style="margin-top:10px;">
                             <label style="margin-bottom:4px;display:block;">At-Bat Zone:</label>
@@ -411,16 +418,39 @@
             document.getElementById('model_status').textContent = `Active: ${ver}`;
         }
 
+        // Map hitter name -> stand ('L','R','S')
+        const HITTER_STAND = {};
+
         async function loadHitters() {
             try {
                 const res = await fetch('/hitters');
                 const data = await res.json();
-                const opts = data.hitters.map(h => `<option>${h}</option>`).join('');
+                const opts = data.hitters.map(h => {
+                    HITTER_STAND[h.name] = h.stand;
+                    return `<option>${h.name}</option>`;
+                }).join('');
                 ['hitter_demo','hitter_atbat'].forEach(id => {
                     document.getElementById(id).innerHTML = opts;
                 });
+                // Refresh silhouettes after loading hitter data
+                syncDemoZone();
+                syncAbPicker();
             } catch (e) { console.error('Error loading hitters:', e); }
         }
+
+        // ── Batting side helper ──────────────────────────────────────────────
+        // Returns 'L' or 'R' — the side the hitter actually bats from.
+        // Switch hitters bat opposite the pitcher's throwing hand.
+        function getEffectiveStand(hitterName, pThrows) {
+            const stand = HITTER_STAND[hitterName] || 'R';
+            if (stand === 'S') return pThrows === 'R' ? 'L' : 'R';
+            return stand;
+        }
+
+        // ── Batter silhouette SVG paths ──────────────────────────────────────
+        // Native orientation: LHH (facing right, bat on right side)
+        const BATTER_BODY_PATH = "M52.2197725,259.366042 C48.9064651,260.423253 49.1461277,261.457204 48.9064651,261.480462 C48.9892978,260.4888 49.2554669,258.254914 48.9064651,257.251623 C47.8020293,254.079992 42.2798505,242.450683 44.4887221,223.420903 C45.7444656,212.60353 42.7635934,197.279271 41.9849661,194.614045 C41.8480161,194.172132 41.7762278,193.928973 41.7762278,193.928973 C41.7762278,193.928973 41.8568516,194.173188 41.9849661,194.614045 C43.1435193,198.329081 45.1767855,204.158537 57.7419513,226.592532 C58.1682636,227.352667 69.2534855,243.035319 68.7863091,246.679522 C68.1402142,251.719242 57.5619283,257.661819 52.2197725,259.366042 L52.2197725,259.366042 Z M25.0373991,82.0930712 C22.5303299,83.8046942 19.983501,84.5954873 16.2615524,86.8674315 C14.9682581,85.1642662 13.0167201,74.5615072 15.0080178,71.5262574 C16.9993155,68.4920647 16.605032,69.4657551 18.1424066,67.8281368 C18.9530625,66.9643962 18.8536632,60.9150407 19.3959412,60.8124913 C20.0851091,60.6824544 21.9041148,64.974727 22.5303299,66.6874072 C23.1720072,67.8524526 23.5530374,70.3770701 24.4111841,71.5262574 C26.1020752,73.7929156 25.9485587,72.1722126 29.4253225,72.9640629 C34.4405654,74.1047925 36.8007446,78.295573 36.8007446,78.295573 C34.9706946,78.4488684 30.052642,78.0989318 25.0373991,82.0930712 L25.0373991,82.0930712 Z M49.5757533,267.407181 C49.8618021,267.680999 50.2108038,267.891383 50.6006697,267.992876 C54.1425951,268.914764 60.9934103,269.184352 64.3685661,268.880932 C67.0545538,268.638831 87.5981637,269.358792 90.8750247,265.709302 C93.0595986,263.276662 89.8136618,258.624938 85.8807661,248.486294 C73.2040523,205.448333 75.0186402,204.990561 69.2037859,198.551095 C66.3885791,195.433383 68.1645117,193.620267 67.8961339,191.733147 C67.3339761,187.770724 67.893925,188.671468 69.2037859,187.518051 C71.1387573,185.812772 75.8436537,173.059648 77.1535146,170.018054 C78.4655842,166.977519 83.4653651,159.069588 84.7763303,157.852739 C86.0872956,156.636947 97.1603686,142.132026 80.1200291,125.100374 L78.8112727,125.100374 C78.8112727,123.443726 78.0359587,123.161451 79.5324692,121.610524 C81.0300841,120.058539 72.7666956,97.6382869 73.5088765,78.9140408 C73.5088765,78.9140408 79.6793592,61.8675869 72.0808411,57.8047289 C68.5168268,54.7959092 48.4061557,54.4808607 46.5540169,53.9617705 C47.0653707,51.6306226 46.5540169,49.8164501 46.5540169,46.9640977 C46.5540169,44.1106878 43.8293739,39.9505666 36.5158001,36.695417 C34.0043132,35.4912548 27.2252864,34.6539445 20.852692,38.975819 C18.5830765,40.5151167 17.7183032,42.968901 17.7183032,45.2524746 C15.538147,46.0760412 10.8233107,49.8164501 9.56977608,51.5280732 C4.13705649,53.4511381 1.00266775,55.5433567 0.166609871,57.8047289 C-1.08692474,61.1962585 5.14430191,68.1326133 5.14430191,68.1326133 C5.14430191,68.1326133 -4.03024608,91.2463953 2.52347582,102.194862 C2.52347582,102.194862 8.29525719,102.869362 13.956595,102.194862 C18.9895088,101.597538 26.1959522,98.600348 26.1959522,98.4005353 C26.1959522,97.9755369 29.0299344,113.233191 30.1310569,116.642693 C30.1310569,116.642693 35.6532358,135.672473 40.0709789,135.672473 C43.8625069,135.672473 43.3323778,137.662143 43.3091846,137.613511 C43.3367955,137.647342 43.4450303,137.759406 43.8139117,138.08397 C44.5892257,138.770099 45.5931578,144.141783 45.5931578,145.187364 C45.5931578,145.187364 41.1754147,147.301784 30.8820733,166.652955 C30.8820733,166.652955 19.7040788,185.766254 20.1911349,192.761813 C22.4000065,224.478113 33.4023956,245.195199 32.3399285,247.736733 C30.1310569,253.022783 21.7870447,257.180789 12.4600845,262.537673 C6.93790562,265.709302 18.0949158,268.225462 18.0949158,268.225462 C18.0949158,268.225462 24.3217247,268.528881 28.2535161,267.31309 C31.2089862,266.398603 40.8783214,265.730447 47.5005184,265.709302 C47.697108,265.709302 47.8804443,265.784364 48.0196032,265.917573 L49.5757533,267.407181 Z";
+        const BATTER_BAT_PATH = "M21.0526316,46.8451531 C28.0671334,42.211283 46.668798,29.2166921 52.9432478,24.633802 C59.2176975,20.0509119 88.4734639,2.06452882 93.4773624,0.279166555 C98.4823638,-1.50513363 101.341104,5.77651045 99.3735143,7.60754232 L59.4151183,30.8151276 C55.002379,33.2271191 36.2661595,42.936686 24.613925,49.3867187 L21.0526316,46.8451531 Z";
 
         // ── Strike Zone SVG ──────────────────────────────────────────────────
         const SZ_X_MIN = -0.85, SZ_X_MAX = 0.85, SZ_Z_MIN = 1.5, SZ_Z_MAX = 3.5;
@@ -482,12 +512,40 @@
             return svg;
         }
 
-        function buildPickerZoneSvg(sz, markerX, markerZ) {
-            const zTL = pitchToSvg(SZ_X_MIN, SZ_Z_MAX, sz), zBR = pitchToSvg(SZ_X_MAX, SZ_Z_MIN, sz);
-            const cTL = pitchToSvg(SZ_X_MIN - CHASE_BORDER, SZ_Z_MAX + CHASE_BORDER, sz);
-            const cBR = pitchToSvg(SZ_X_MAX + CHASE_BORDER, SZ_Z_MIN - CHASE_BORDER, sz);
+        function batterSilhouette(cx, cy, side, scale) {
+            const s = scale || 1;
+            // SVG paths natively depict a LHH (facing right, bat on right).
+            // RHH needs horizontal mirror; LHH keeps native orientation.
+            const flip = side === 'R' ? 1 : -1;
+            // SVG is ~101 wide, ~270 tall. Scale to ~80px tall at base (sz=220).
+            const pathScale = 200 / 270;
+            const ts = pathScale * s;
+            // Transform chain (applied right-to-left):
+            //   1. translate(-50,-268): anchor feet at origin, center horizontally
+            //   2. scale(flip*ts, ts): shrink + optional horizontal flip
+            //   3. translate(cx,cy): position in SVG canvas
+            let g = `<g transform="translate(${cx},${cy}) scale(${flip * ts},${ts}) translate(-100,-250)" opacity="0.35" fill-rule="nonzero">`;
+            g += `<path d="${BATTER_BODY_PATH}" fill="#8b949e"/>`;
+            g += `<path d="${BATTER_BAT_PATH}" fill="#c9d1d9"/>`;
+            g += `</g>`;
+            return g;
+        }
 
-            let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;">`;
+        function buildPickerZoneSvg(w, h, markerX, markerZ, batterSide, isSwitch) {
+            // Zone is drawn based on h (height). Extra width provides space for batter silhouettes.
+            const pad = (w - h) / 2;  // horizontal padding on each side
+            // Offset pitch coords into the centered zone area
+            function pToSvg(px, pz) {
+                const p = pitchToSvg(px, pz, h);
+                return { x: p.x + pad, y: p.y };
+            }
+            function fToPx(ft) { return ftToPx(ft, h); }
+
+            const zTL = pToSvg(SZ_X_MIN, SZ_Z_MAX), zBR = pToSvg(SZ_X_MAX, SZ_Z_MIN);
+            const cTL = pToSvg(SZ_X_MIN - CHASE_BORDER, SZ_Z_MAX + CHASE_BORDER);
+            const cBR = pToSvg(SZ_X_MAX + CHASE_BORDER, SZ_Z_MIN - CHASE_BORDER);
+
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;">`;
             svg += `<rect x="${cTL.x}" y="${cTL.y}" width="${cBR.x-cTL.x}" height="${cBR.y-cTL.y}" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>`;
             svg += `<rect x="${zTL.x}" y="${zTL.y}" width="${zBR.x-zTL.x}" height="${zBR.y-zTL.y}" fill="none" stroke="#8b949e" stroke-width="2"/>`;
             const tw = (zBR.x-zTL.x)/3, th = (zBR.y-zTL.y)/3;
@@ -495,11 +553,25 @@
                 svg += `<line x1="${zTL.x+tw*i}" y1="${zTL.y}" x2="${zTL.x+tw*i}" y2="${zTL.y+(zBR.y-zTL.y)}" stroke="#21262d" stroke-width="1"/>`;
                 svg += `<line x1="${zTL.x}" y1="${zTL.y+th*i}" x2="${zTL.x+(zBR.x-zTL.x)}" y2="${zTL.y+th*i}" stroke="#21262d" stroke-width="1"/>`;
             }
-            const hp = pitchToSvg(0, 0.9, sz), hpW = ftToPx(17/12, sz);
+            const hp = pToSvg(0, 0.9), hpW = fToPx(17/12);
             svg += `<polygon points="${hp.x},${hp.y+6} ${hp.x-hpW/2},${hp.y} ${hp.x-hpW/2},${hp.y-6} ${hp.x+hpW/2},${hp.y-6} ${hp.x+hpW/2},${hp.y}" fill="none" stroke="#484f58" stroke-width="1"/>`;
 
+            // Batter silhouette
+            if (batterSide) {
+                const scale = h / 220;  // normalize to base size
+                // RHH on right side, LHH on left side — use full width for positioning
+                const bx = batterSide === 'R' ? w - 18 * scale : 18 * scale;
+                const by = hp.y - 2;
+                svg += batterSilhouette(bx, by, batterSide, scale);
+                // Batting side label
+                const labelX = batterSide === 'R' ? w - 8 : 8;
+                const anchor = batterSide === 'R' ? 'end' : 'start';
+                const label = isSwitch ? `SW(${batterSide})` : `${batterSide}HH`;
+                svg += `<text x="${labelX}" y="14" text-anchor="${anchor}" fill="${isSwitch ? '#d29922' : '#484f58'}" font-size="${10*scale}px" font-family="Courier New">${label}</text>`;
+            }
+
             if (markerX !== null && markerZ !== null) {
-                const pos = pitchToSvg(markerX, markerZ, sz);
+                const pos = pToSvg(markerX, markerZ);
                 svg += `<circle cx="${pos.x}" cy="${pos.y}" r="8" fill="#58a6ff" fill-opacity="0.9" stroke="#fff" stroke-width="2"/>`;
                 svg += `<line x1="${pos.x-12}" y1="${pos.y}" x2="${pos.x+12}" y2="${pos.y}" stroke="#58a6ff" stroke-width="1" opacity="0.5"/>`;
                 svg += `<line x1="${pos.x}" y1="${pos.y-12}" x2="${pos.x}" y2="${pos.y+12}" stroke="#58a6ff" stroke-width="1" opacity="0.5"/>`;
@@ -587,22 +659,27 @@
             const px = parseFloat(document.getElementById('plate_x_demo').value);
             const pz = parseFloat(document.getElementById('plate_z_demo').value);
             if (isNaN(px) || isNaN(pz)) return;
+            const hitter = document.getElementById('hitter_demo').value;
+            const pThrows = document.getElementById('p_throws_demo').value;
+            const side = getEffectiveStand(hitter, pThrows);
+            const sw = (HITTER_STAND[hitter] === 'S');
             const container = document.getElementById('demo_zone_picker');
-            container.innerHTML = buildPickerZoneSvg(220, px, pz);
+            container.innerHTML = buildPickerZoneSvg(400, 250, px, pz, side, sw);
             attachDemoZoneClick();
         }
 
         function attachDemoZoneClick() {
-            const sz = 220;
+            const w = 400, h = 250;
+            const pad = (w - h) / 2;
             const container = document.getElementById('demo_zone_picker');
             const svg = container.querySelector('svg');
             if (!svg) return;
             svg.style.cursor = 'crosshair';
             svg.addEventListener('click', (e) => {
                 const rect = svg.getBoundingClientRect();
-                const svgX = (e.clientX - rect.left) * (sz / rect.width);
-                const svgY = (e.clientY - rect.top) * (sz / rect.height);
-                const coords = svgToPitch(svgX, svgY, sz);
+                const svgX = (e.clientX - rect.left) * (w / rect.width);
+                const svgY = (e.clientY - rect.top) * (h / rect.height);
+                const coords = svgToPitch(svgX - pad, svgY, h);
                 document.getElementById('plate_x_demo').value = coords.px.toFixed(1);
                 document.getElementById('plate_z_demo').value = coords.pz.toFixed(1);
                 syncDemoZone();
@@ -627,6 +704,7 @@
             const rel_x         = parseFloat(document.getElementById('rel_x_demo')?.value || -1.5);
             const rel_z         = parseFloat(document.getElementById('rel_z_demo')?.value || 6.0);
             const ext           = parseFloat(document.getElementById('ext_demo')?.value || 6.3);
+            const p_throws      = document.getElementById('p_throws_demo').value;
 
             const loading = document.getElementById('loading_demo');
             loading.classList.add('active');
@@ -643,6 +721,7 @@
                             pitch_type, release_speed, plate_x, plate_z, balls, strikes,
                             release_spin_rate: spin, pfx_x, pfx_z,
                             release_pos_x: rel_x, release_pos_z: rel_z, release_extension: ext,
+                            p_throws,
                         },
                     }),
                 });
@@ -880,8 +959,12 @@
             document.getElementById('ab_summary').innerHTML = '';
             document.getElementById('ab_count_display').textContent = '0-0';
             updateAbZone();
-            // Reset picker to empty zone
-            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(200, null, null);
+            // Reset picker to empty zone with batter silhouette
+            const hitter = document.getElementById('hitter_atbat').value;
+            const pThrows = document.getElementById('p_throws_atbat').value;
+            const side = getEffectiveStand(hitter, pThrows);
+            const sw = (HITTER_STAND[hitter] === 'S');
+            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(200, 200, null, null, side, sw);
         }
 
         function updateAbZone() {
@@ -989,14 +1072,20 @@
         function syncAbPicker() {
             if (ab_active_idx === null || ab_active_idx >= ab_pitches.length) return;
             const pitch = ab_pitches[ab_active_idx];
-            const sz = 200;
+            // const sz = 200;
+            const hitter = document.getElementById('hitter_atbat').value;
+            const pThrows = document.getElementById('p_throws_atbat').value;
+            const side = getEffectiveStand(hitter, pThrows);
+            const sw = (HITTER_STAND[hitter] === 'S');
             const container = document.getElementById('ab_picker_svg');
-            container.innerHTML = buildPickerZoneSvg(sz, pitch.plate_x, pitch.plate_z);
+            container.innerHTML = buildPickerZoneSvg(400, 250, pitch.plate_x, pitch.plate_z, side, sw);
             attachAbPickerClick();
         }
 
         function attachAbPickerClick() {
-            const sz = 200;
+            // const sz = 200;
+            const w = 400, h = 250;
+            const pad = (w - h) / 2;
             const container = document.getElementById('ab_picker_svg');
             const svg = container.querySelector('svg');
             if (!svg) return;
@@ -1004,9 +1093,9 @@
             svg.addEventListener('click', (e) => {
                 if (ab_active_idx === null) return;
                 const rect = svg.getBoundingClientRect();
-                const svgX = (e.clientX - rect.left) * (sz / rect.width);
-                const svgY = (e.clientY - rect.top) * (sz / rect.height);
-                const coords = svgToPitch(svgX, svgY, sz);
+                const svgX = (e.clientX - rect.left) * (w / rect.width);
+                const svgY = (e.clientY - rect.top) * (h / rect.height);
+                const coords = svgToPitch(svgX - pad, svgY, h);
                 const idx = ab_active_idx;
                 ab_pitches[idx].plate_x = parseFloat(coords.px.toFixed(1));
                 ab_pitches[idx].plate_z = parseFloat(coords.pz.toFixed(1));

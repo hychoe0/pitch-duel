@@ -131,10 +131,17 @@ def load_hitters():
         try:
             with open(path) as f:
                 data = json.load(f)
-            hitters.append(data.get("player_name", f"Player {data.get('player_id')}"))
+            hitters.append({
+                "name": data.get("player_name", f"Player {data.get('player_id')}"),
+                "stand": data.get("stand", "R"),
+            })
         except Exception:
             pass
-    _HITTERS_CACHE = sorted(set(hitters))
+    # Deduplicate by name, sort alphabetically
+    seen = {}
+    for h in hitters:
+        seen[h["name"]] = h["stand"]
+    _HITTERS_CACHE = [{"name": n, "stand": s} for n, s in sorted(seen.items())]
     return _HITTERS_CACHE
 
 
@@ -149,7 +156,8 @@ def index():
 
 @app.route("/hitters", methods=["GET"])
 def hitters():
-    return jsonify({"hitters": load_hitters()})
+    data = load_hitters()
+    return jsonify({"hitters": data})
 
 
 @app.route("/api/models", methods=["GET"])
