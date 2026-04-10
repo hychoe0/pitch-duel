@@ -966,7 +966,7 @@
             const pThrows = document.getElementById('p_throws_atbat').value;
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
-            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(200, 200, null, null, side, sw);
+            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(400, 200, null, null, side, sw);
         }
 
         function updateAbZone() {
