@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: pitch-duel
+    runtime: python
+    buildCommand: pip install -r requirements-deploy.txt
+    startCommand: gunicorn src.demo.server:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1
+    envVars:
+      - key: PITCH_DUEL_PROFILES
+        value: data/processed/profiles_demo
+      - key: PITCH_DUEL_DEMO
+        value: "1"
+      - key: PYTHON_VERSION
+        value: "3.11.11"

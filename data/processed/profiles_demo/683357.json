@@ -1,0 +1,56 @@
+{
+  "player_id": 683357,
+  "player_name": "Caissie, Owen",
+  "stand": "R",
+  "swing_rate": 0.47,
+  "chase_rate": 0.3,
+  "contact_rate": 0.78,
+  "hard_hit_rate": 0.38,
+  "whiff_rate": 0.25,
+  "swing_rate_by_count": {},
+  "contact_rate_by_pitch_type": {},
+  "zone_swing_rates": {
+    "1": 0.47,
+    "2": 0.47,
+    "3": 0.47,
+    "4": 0.47,
+    "5": 0.47,
+    "6": 0.47,
+    "7": 0.47,
+    "8": 0.47,
+    "9": 0.47,
+    "11": 0.47,
+    "12": 0.47,
+    "13": 0.47,
+    "14": 0.47
+  },
+  "zone_whiff_rates": {
+    "1": 0.25,
+    "2": 0.25,
+    "3": 0.25,
+    "4": 0.25,
+    "5": 0.25,
+    "6": 0.25,
+    "7": 0.25,
+    "8": 0.25,
+    "9": 0.25,
+    "11": 0.25,
+    "12": 0.25,
+    "13": 0.25,
+    "14": 0.25
+  },
+  "family_swing_rates": {
+    "fastball": 0.47,
+    "breaking": 0.47,
+    "offspeed": 0.47,
+    "other": 0.47
+  },
+  "family_whiff_rates": {
+    "fastball": 0.25,
+    "breaking": 0.25,
+    "offspeed": 0.25,
+    "other": 0.25
+  },
+  "sample_size": 0,
+  "is_thin_sample": true
+}

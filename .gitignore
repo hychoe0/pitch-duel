@@ -1,8 +1,13 @@
 data/raw/
-data/processed/
-models/
+data/processed/*
+!data/processed/profiles_demo/
+models/*
+!models/*.json
+!models/*.pkl
+models_v2/*
+!models_v2/*.json
+!models_v2/*.pkl
 venv/
-*.pkl
 *.parquet
 __pycache__/
 *.pyc

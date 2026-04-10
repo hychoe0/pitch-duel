@@ -372,6 +372,18 @@ def _resolve_hitter_profile(hitter_name: str):
     except ValueError:
         pass
 
+    # Fallback: scan profile JSONs directly (works without the parquet)
+    try:
+        import json
+        for path in PROFILE_DIR.glob("*.json"):
+            with open(path) as f:
+                data = json.load(f)
+            if data.get("player_name", "").lower() == hitter_name.lower():
+                profile = load_profile(data["player_id"], PROFILE_DIR)
+                return profile_to_feature_dict(profile), profile.is_thin_sample, False
+    except Exception:
+        pass
+
     warnings.warn(
         f"Hitter '{hitter_name}' not found — using league-average profile.",
         stacklevel=3,

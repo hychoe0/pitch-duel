@@ -1,0 +1,35 @@
+{
+  "PITCH_TYPE_MAP": {
+    "FF": 0,
+    "SI": 1,
+    "FC": 2,
+    "SL": 3,
+    "CU": 4,
+    "CH": 5,
+    "FS": 6,
+    "KC": 7,
+    "CS": 8,
+    "KN": 9,
+    "EP": 10,
+    "FO": 11,
+    "SC": 12,
+    "SV": 13,
+    "FIRST_PITCH": 14,
+    "ST": 16,
+    "OTHER": 17
+  },
+  "PREV_RESULT_MAP": {
+    "FIRST_PITCH": 0,
+    "ball": 1,
+    "blocked_ball": 1,
+    "called_strike": 2,
+    "swinging_strike": 3,
+    "swinging_strike_blocked": 3,
+    "foul": 4,
+    "foul_tip": 4,
+    "foul_bunt": 4,
+    "hit_into_play": 5,
+    "pitchout": 6,
+    "OTHER": 7
+  }
+}

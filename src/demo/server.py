@@ -10,6 +10,7 @@ Run:
 
 import io
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -22,9 +23,10 @@ from src.model.predict_combined import predict_matchup
 from src.demo.at_bat import simulate_at_bat
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILE_DIR = ROOT / "data" / "processed" / "profiles"
+PROFILE_DIR = ROOT / os.environ.get("PITCH_DUEL_PROFILES", "data/processed/profiles")
 MODEL_DIR = ROOT / "models"
 MODEL_V2_DIR = ROOT / "models_v2"
+DEMO_MODE = os.environ.get("PITCH_DUEL_DEMO", "").lower() in ("1", "true", "yes")
 
 # Model version registry
 MODEL_VERSIONS = {
@@ -151,7 +153,7 @@ def load_hitters():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", demo_mode=DEMO_MODE)
 
 
 @app.route("/hitters", methods=["GET"])
@@ -390,6 +392,9 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
     """Load hitter profile summary for frontend display."""
     from src.hitters.profiles import get_player_id, load_profile
 
+    profile = None
+
+    # Try parquet-based lookup first
     try:
         df = pd.read_parquet(
             ROOT / "data" / "processed" / "statcast_processed.parquet",
@@ -397,6 +402,22 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
         )
         pid = get_player_id(hitter_name, df)
         profile = load_profile(pid, PROFILE_DIR)
+    except (FileNotFoundError, ValueError):
+        pass
+
+    # Fallback: scan profile JSONs directly (works without parquet)
+    if profile is None:
+        for path in PROFILE_DIR.glob("*.json"):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                if data.get("player_name", "").lower() == hitter_name.lower():
+                    profile = load_profile(data["player_id"], PROFILE_DIR)
+                    break
+            except Exception:
+                continue
+
+    if profile:
         return {
             "player_name": profile.player_name,
             "swing_rate": round(profile.swing_rate, 3),
@@ -407,14 +428,14 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
             "sample_size": profile.sample_size,
             "is_thin_sample": profile.is_thin_sample,
         }
-    except (FileNotFoundError, ValueError):
-        return {
-            "player_name": hitter_name,
-            "swing_rate": 0.47, "chase_rate": 0.29,
-            "contact_rate": 0.72, "hard_hit_rate": 0.35,
-            "whiff_rate": 0.25, "sample_size": 0,
-            "is_thin_sample": True,
-        }
+
+    return {
+        "player_name": hitter_name,
+        "swing_rate": 0.47, "chase_rate": 0.29,
+        "contact_rate": 0.72, "hard_hit_rate": 0.35,
+        "whiff_rate": 0.25, "sample_size": 0,
+        "is_thin_sample": True,
+    }
 
 
 def _verdict_text(mr, danger: str) -> str:
