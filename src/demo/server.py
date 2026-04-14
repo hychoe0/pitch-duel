@@ -457,6 +457,16 @@ def _verdict_text(mr, danger: str) -> str:
         )
 
 
+@app.route("/api/hitter_profile")
+def api_hitter_profile():
+    """Return aggregate hitter profile stats for display."""
+    name = request.args.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    profile = _load_hitter_profile_for_display(name)
+    return jsonify(profile)
+
+
 @app.route("/at_bat", methods=["POST"])
 def at_bat():
     """

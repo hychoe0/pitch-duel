@@ -139,6 +139,24 @@
 
         /* Low confidence warning */
         .low-confidence { background: #3d2e00; border: 1px solid #d29922; color: #d29922; padding: 8px 12px; border-radius: 4px; font-size: 0.85em; margin-top: 8px; }
+
+        /* Preset buttons */
+        .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+        .preset-btn { background: #21262d; color: #8b949e; border: 1px solid #30363d; border-radius: 4px; padding: 5px 10px; font-size: 0.78em; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+        .preset-btn:hover { background: #30363d; color: #c9d1d9; border-color: #58a6ff; }
+
+        /* Hitter profile card */
+        .hitter-card { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; padding: 10px 12px; margin-top: 6px; font-size: 0.82em; display: none; }
+        .hitter-card.loaded { display: block; }
+        .hitter-card-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+        .hitter-card-stat { text-align: center; min-width: 52px; }
+        .hitter-card-stat .v { font-weight: bold; color: #58a6ff; font-size: 1.05em; }
+        .hitter-card-stat .l { color: #6e7681; font-size: 0.78em; margin-top: 1px; }
+        .thin-badge { display: inline-block; background: #3d2e00; color: #d29922; border: 1px solid #d29922; border-radius: 3px; padding: 1px 6px; font-size: 0.75em; margin-left: 6px; vertical-align: middle; }
+
+        /* Result fade-in */
+        @keyframes resultFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .result-fade { animation: resultFadeIn 0.2s ease; }
     </style>
 </head>
 <body>
@@ -175,7 +193,12 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Hitter Name</label>
-                        <select id="hitter_demo" required onchange="syncDemoZone()"><option>Loading...</option></select>
+                        <select id="hitter_demo" required onchange="syncDemoZone(); loadHitterCard('demo');"><option>Loading...</option></select>
+                        <div class="hitter-card" id="hitter_card_demo">
+                            <span id="hitter_card_demo_name" style="color:#8b949e;"></span>
+                            <span id="hitter_card_demo_thin" class="thin-badge" style="display:none;">THIN SAMPLE</span>
+                            <div class="hitter-card-stats" id="hitter_card_demo_stats"></div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Pitcher Throws</label>
@@ -186,6 +209,12 @@
                     </div>
                     <div class="form-group">
                         <label>Pitch Type</label>
+                        <div class="preset-row">
+                            <button class="preset-btn" onclick="applyPreset('demo','kbo_power')">KBO Power Arm</button>
+                            <button class="preset-btn" onclick="applyPreset('demo','kbo_finesse')">KBO Finesse LHP</button>
+                            <button class="preset-btn" onclick="applyPreset('demo','sweeper')">High-Spin Sweeper</button>
+                            <button class="preset-btn" onclick="applyPreset('demo','sinker')">Ground Ball Sinker</button>
+                        </div>
                         <select id="pitch_type_demo" onchange="applyPitchTypeDefaults('demo')">
                             <option>FF</option><option>SI</option><option>FC</option>
                             <option>SL</option><option>CU</option><option>CH</option>
@@ -260,7 +289,7 @@
                 </div>
 
                 <button onclick="runPredictDemo()">Run Prediction</button>
-                <div class="loading" id="loading_demo">Running prediction pipeline...</div>
+                <div class="loading" id="loading_demo">computing...</div>
                 <div id="result_demo"></div>
             </div>
         </div>
@@ -279,7 +308,12 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Hitter Name</label>
-                        <select id="hitter_atbat" required onchange="syncAbPicker()"><option>Loading...</option></select>
+                        <select id="hitter_atbat" required onchange="syncAbPicker(); loadHitterCard('atbat');"><option>Loading...</option></select>
+                        <div class="hitter-card" id="hitter_card_atbat">
+                            <span id="hitter_card_atbat_name" style="color:#8b949e;"></span>
+                            <span id="hitter_card_atbat_thin" class="thin-badge" style="display:none;">THIN SAMPLE</span>
+                            <div class="hitter-card-stats" id="hitter_card_atbat_stats"></div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Pitcher Throws</label>
@@ -374,6 +408,81 @@
             if (mode === 'demo') set('release_speed_demo', d.speed);
         }
 
+        // ── Preset configurations ────────────────────────────────────────────
+        const PRESETS = {
+            kbo_power:  { pt:'FF',  speed:94.0, spin:2280, pfx_x:-0.65, pfx_z:1.35, rel_x:-1.85, rel_z:6.05, ext:6.3, plate_x:0.15,  plate_z:2.6, p_throws:'R' },
+            kbo_finesse:{ pt:'CH',  speed:83.5, spin:1820, pfx_x:0.95,  pfx_z:0.75, rel_x:1.70,  rel_z:5.85, ext:5.9, plate_x:-0.30, plate_z:2.2, p_throws:'L' },
+            sweeper:    { pt:'ST',  speed:83.0, spin:2650, pfx_x:1.45,  pfx_z:0.15, rel_x:-1.90, rel_z:6.10, ext:6.2, plate_x:0.55,  plate_z:1.9, p_throws:'R' },
+            sinker:     { pt:'SI',  speed:93.5, spin:2050, pfx_x:-1.35, pfx_z:0.85, rel_x:-1.75, rel_z:5.95, ext:6.4, plate_x:-0.20, plate_z:2.1, p_throws:'R' },
+        };
+
+        function applyPreset(mode, key) {
+            const p = PRESETS[key];
+            if (!p) return;
+            const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+            // Pitch type — find and select the right option
+            const ptSel = document.getElementById(`pitch_type_${mode}`);
+            if (ptSel) {
+                // ST (Sweeper) may not be in select; add it if missing
+                let found = false;
+                for (const opt of ptSel.options) { if (opt.value === p.pt) { found = true; break; } }
+                if (!found) { const opt = document.createElement('option'); opt.value = p.pt; opt.textContent = p.pt; ptSel.appendChild(opt); }
+                ptSel.value = p.pt;
+            }
+            if (mode === 'demo') {
+                set('release_speed_demo', p.speed);
+                set('plate_x_demo', p.plate_x);
+                set('plate_z_demo', p.plate_z);
+                const pThrowsSel = document.getElementById('p_throws_demo');
+                if (pThrowsSel) pThrowsSel.value = p.p_throws;
+            }
+            set(`spin_${mode}`,  p.spin);
+            set(`pfx_x_${mode}`, p.pfx_x);
+            set(`pfx_z_${mode}`, p.pfx_z);
+            set(`rel_x_${mode}`, p.rel_x);
+            set(`rel_z_${mode}`, p.rel_z);
+            set(`ext_${mode}`,   p.ext);
+            // Open advanced section so user can see the values
+            const advEl = document.getElementById(`adv_${mode}`);
+            const advBtn = advEl && advEl.previousElementSibling;
+            if (advEl && !advEl.classList.contains('open')) {
+                advEl.classList.add('open');
+                if (advBtn && advBtn.classList.contains('adv-toggle')) advBtn.textContent = '- Advanced pitch inputs';
+            }
+            if (mode === 'demo') syncDemoZone();
+        }
+
+        // ── Hitter profile card ──────────────────────────────────────────────
+        async function loadHitterCard(mode) {
+            const sel = document.getElementById(`hitter_${mode}`);
+            if (!sel) return;
+            const name = sel.value;
+            if (!name || name === 'Loading...') return;
+            const card = document.getElementById(`hitter_card_${mode}`);
+            const nameEl = document.getElementById(`hitter_card_${mode}_name`);
+            const thinEl = document.getElementById(`hitter_card_${mode}_thin`);
+            const statsEl = document.getElementById(`hitter_card_${mode}_stats`);
+            try {
+                const res = await fetch(`/api/hitter_profile?name=${encodeURIComponent(name)}`);
+                if (!res.ok) return;
+                const p = await res.json();
+                nameEl.textContent = p.player_name;
+                thinEl.style.display = p.is_thin_sample ? 'inline-block' : 'none';
+                const stats = [
+                    { v: (p.swing_rate*100).toFixed(0)+'%',    l: 'Swing' },
+                    { v: (p.chase_rate*100).toFixed(0)+'%',    l: 'Chase' },
+                    { v: (p.contact_rate*100).toFixed(0)+'%',  l: 'Contact' },
+                    { v: (p.hard_hit_rate*100).toFixed(0)+'%', l: 'Hard Hit' },
+                    { v: (p.whiff_rate*100).toFixed(0)+'%',    l: 'Whiff' },
+                    { v: p.sample_size > 0 ? p.sample_size.toLocaleString() : '—', l: 'Pitches' },
+                ];
+                statsEl.innerHTML = stats.map(s =>
+                    `<div class="hitter-card-stat"><div class="v">${s.v}</div><div class="l">${s.l}</div></div>`
+                ).join('');
+                card.classList.add('loaded');
+            } catch (e) { console.error('hitter card error:', e); }
+        }
+
         function toggleAdv(id, btn) {
             const el = document.getElementById(id);
             el.classList.toggle('open');
@@ -434,9 +543,11 @@
                 ['hitter_demo','hitter_atbat'].forEach(id => {
                     document.getElementById(id).innerHTML = opts;
                 });
-                // Refresh silhouettes after loading hitter data
+                // Refresh silhouettes and profile cards after loading hitter data
                 syncDemoZone();
                 syncAbPicker();
+                loadHitterCard('demo');
+                loadHitterCard('atbat');
             } catch (e) { console.error('Error loading hitters:', e); }
         }
 
@@ -936,7 +1047,11 @@
                 </div>
             </div>`;
 
-            document.getElementById('result_demo').innerHTML = html;
+            const resultEl = document.getElementById('result_demo');
+            resultEl.classList.remove('result-fade');
+            void resultEl.offsetWidth; // force reflow to re-trigger animation
+            resultEl.innerHTML = html;
+            resultEl.classList.add('result-fade');
         }
 
         // ================================================================
