@@ -1245,7 +1245,7 @@
                                oninput="ab_pitches[${idx}].plate_x=parseFloat(this.value); syncAbPicker();">
                         <input type="number" id="ab_pz_${idx}" step="0.1" value="2.5" placeholder="Plate Z"
                                oninput="ab_pitches[${idx}].plate_z=parseFloat(this.value); syncAbPicker();">
-                        <button style="padding:8px 12px;width:auto;background:#1f6feb;color:#fff;" onmouseover="this.style.background='#388bfd'" onmouseout="this.style.background='#1f6feb'" onclick="throwPitch(${idx})">Throw</button>
+                        <button id="throw_btn_${idx}" style="padding:8px 12px;width:auto;background:#1f6feb;color:#fff;border:none;border-radius:4px;font-family:inherit;font-weight:bold;font-size:0.9em;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='#388bfd'" onmouseout="if(!this.dataset.thrown)this.style.background='#1f6feb'" onclick="throwPitch(${idx})">Throw</button>
                         <button class="adv-toggle" style="padding:6px 10px;margin:0;" onclick="toggleAdv('ab_adv_${idx}', this)">+ Advanced pitch inputs</button>
                     </div>
                     <div class="adv-section" id="ab_adv_${idx}" style="margin-top:8px;margin-bottom:0;">
@@ -1365,8 +1365,8 @@
             const pitchCard = document.getElementById(`ab_pitch_${idx}`);
             const btns = pitchCard.querySelectorAll('button');
             btns.forEach(b => { b.disabled = true; });
-            const throwBtn = pitchCard.querySelector('button.secondary');
-            if (throwBtn) throwBtn.textContent = '...';
+            const throwBtn = document.getElementById(`throw_btn_${idx}`);
+            if (throwBtn) { throwBtn.textContent = '...'; throwBtn.style.background = '#484f58'; }
             pitchCard.querySelectorAll('input, select').forEach(el => el.disabled = true);
 
             try {
@@ -1418,8 +1418,19 @@
                     ab_over ? (ab_strikes >= 3 ? 'K' : ab_balls >= 4 ? 'BB' : 'In Play')
                             : `${ab_balls}-${ab_strikes}`;
 
-                // Update button text to show outcome
-                if (throwBtn) { throwBtn.textContent = outcome.replace(/_/g,' '); throwBtn.style.fontSize = '0.7em'; }
+                // Update button to show outcome with outcome color
+                if (throwBtn) {
+                    const btnOutcomeColors = {
+                        'ball': '#8b949e', 'called_strike': '#d29922',
+                        'swinging_strike': '#3fb950', 'foul': '#6e7681', 'hit_into_play': '#f85149',
+                    };
+                    const btnColor = btnOutcomeColors[outcome] || '#8b949e';
+                    throwBtn.textContent = outcome.replace(/_/g,' ');
+                    throwBtn.style.background = btnColor;
+                    throwBtn.style.fontSize = '0.75em';
+                    throwBtn.dataset.thrown = '1';
+                    throwBtn.onmouseout = null;
+                }
 
                 // Render compact card
                 renderCompactPitchCard(idx, data, outcome);
@@ -1435,7 +1446,7 @@
                 displayError('ab_pitch_results', e.message);
                 // Re-enable on error
                 btns.forEach(b => { b.disabled = false; });
-                if (throwBtn) { throwBtn.textContent = 'Throw'; }
+                if (throwBtn) { throwBtn.textContent = 'Throw'; throwBtn.style.background = '#1f6feb'; }
                 pitchCard.querySelectorAll('input, select').forEach(el => el.disabled = false);
             }
         }
@@ -1476,18 +1487,35 @@
             const danger = data.verdict.danger_level;
             const dangerCls = dangerBadgeClass(danger);
 
+            // Outcome colors — pitcher's POV: green = good for pitcher, red = bad
             const outcomeColors = {
-                'ball': '#8b949e', 'called_strike': '#d29922', 'swinging_strike': '#3fb950',
-                'foul': '#6e7681', 'hit_into_play': '#f85149',
+                'swinging_strike': '#3fb950',   // best outcome: whiff
+                'called_strike':   '#58a6ff',   // good: free strike
+                'foul':            '#d29922',   // neutral: foul ball
+                'ball':            '#8b949e',   // bad: free ball
+                'hit_into_play':   '#f85149',   // worst: ball in play
+            };
+            const outcomeLabels = {
+                'swinging_strike': 'Swinging Strike',
+                'called_strike':   'Called Strike',
+                'foul':            'Foul Ball',
+                'ball':            'Ball',
+                'hit_into_play':   'Hit Into Play',
             };
             const oc = outcomeColors[outcome] || '#8b949e';
+            const ol = outcomeLabels[outcome] || outcome.replace(/_/g, ' ');
 
-            let html = `<div class="compact-pitch-card">
-                <div class="compact-pitch-header">
-                    <span class="pitch-label">#${idx+1} ${pitch.pitch_type} ${pitch.release_speed} mph</span>
-                    <span class="pitch-count" style="color:#58a6ff;">${data.input_features.count}</span>
-                    <span class="pitch-outcome" style="background:${oc}22;color:${oc};border:1px solid ${oc};">${outcome.replace(/_/g,' ')}</span>
-                    <span class="danger-badge ${dangerCls}" style="padding:2px 8px;font-size:0.75em;">${danger}</span>
+            let html = `<div style="background:#161b22;border:1px solid #30363d;border-left:4px solid ${oc};border-radius:6px;padding:12px 14px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-weight:bold;color:#c9d1d9;font-size:0.95em;">#${idx+1} &nbsp;${pitch.pitch_type}</span>
+                        <span style="color:#6e7681;font-size:0.85em;">${pitch.release_speed} mph</span>
+                        <span style="color:#484f58;font-size:0.82em;">count ${data.input_features.count}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="background:${oc};color:#0d1117;border-radius:4px;padding:3px 10px;font-weight:bold;font-size:0.82em;letter-spacing:0.02em;">${ol}</span>
+                        <span class="danger-badge ${dangerCls}" style="padding:2px 8px;font-size:0.75em;">${danger}</span>
+                    </div>
                 </div>
                 <div class="compact-bars">
                     <div class="compact-bar-item">
@@ -1506,8 +1534,8 @@
                         <div class="compact-bar-val" style="color:${hardColor2(b.p_hard_contact)};">${(b.p_hard_contact*100).toFixed(0)}%</div>
                     </div>
                     <div class="compact-bar-item">
-                        <div class="compact-bar-label">P(Hard Contact)</div>
-                        <div class="compact-bar-track"><div class="compact-bar-fill" style="width:${Math.round(b.p_hard*100*3)}%;background:${dangerColor(b.p_hard)};"></div></div>
+                        <div class="compact-bar-label">Damage Index</div>
+                        <div class="compact-bar-track"><div class="compact-bar-fill" style="width:${Math.min(100,Math.round(b.p_hard*100*4))}%;background:${dangerColor(b.p_hard)};"></div></div>
                         <div class="compact-bar-val" style="color:${dangerColor(b.p_hard)};">${(b.p_hard*100).toFixed(1)}%</div>
                     </div>
                 </div>
