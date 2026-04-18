@@ -157,6 +157,25 @@
         /* Result fade-in */
         @keyframes resultFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .result-fade { animation: resultFadeIn 0.2s ease; }
+
+        /* About panel */
+        .about-panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 28px 32px; margin-bottom: 24px; }
+        .about-panel .about-lead { font-size: 1.05em; color: #c9d1d9; line-height: 1.75; margin-bottom: 18px; }
+        .about-panel .about-body { font-size: 0.88em; color: #8b949e; line-height: 1.8; }
+        .about-panel .about-body p { margin-bottom: 12px; }
+        .about-panel .about-body p:last-child { margin-bottom: 0; }
+        .about-highlight { color: #58a6ff; font-weight: bold; }
+        .about-tag { display: inline-block; background: #21262d; color: #8b949e; border: 1px solid #30363d; border-radius: 3px; padding: 2px 8px; font-size: 0.78em; margin: 0 3px 4px 0; font-family: inherit; }
+        .about-tag.blue { border-color: #58a6ff; color: #58a6ff; }
+        .about-tag.yellow { border-color: #d29922; color: #d29922; }
+        .about-divider { border: none; border-top: 1px solid #21262d; margin: 18px 0; }
+        .about-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 16px; }
+        @media (max-width: 600px) { .about-cols { grid-template-columns: 1fr; } }
+        .about-col-head { font-size: 0.78em; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; font-weight: bold; }
+        .about-col-body { font-size: 0.84em; color: #8b949e; line-height: 1.7; }
+        .about-toggle { background: none; border: none; color: #6e7681; font-size: 0.8em; font-family: inherit; cursor: pointer; padding: 0; margin-top: 14px; text-decoration: underline; text-underline-offset: 3px; }
+        .about-toggle:hover { color: #8b949e; }
+        .about-collapsible { overflow: hidden; transition: max-height 0.3s ease; }
     </style>
 </head>
 <body>
@@ -173,6 +192,91 @@
     </header>
 
     <div class="container">
+
+        <!-- ================================================================ -->
+        <!-- About panel                                                       -->
+        <!-- ================================================================ -->
+        <div class="about-panel">
+            <p class="about-lead">
+                <span class="about-highlight">Pitch Duel</span> is a competitive exposure simulator
+                that answers one question every pitcher on earth should be able to ask —
+                <em style="color:#c9d1d9;">"How does my pitch hold up against elite hitters?"</em>
+            </p>
+
+            <div class="about-body">
+                <p>
+                    The idea started at the 2026 WBC. Watching international pitchers —
+                    many of them dominant in their home leagues — get exposed by MLB lineups
+                    in the first time they had ever faced that caliber of hitter at the professional level.
+                    Not because they weren't talented, but because they had never had the chance to train against it.
+                    A KBO ace with a 93 mph sinker and elite command has no way to know how that pitch plays
+                    against Ohtani, Judge, or a cleanup hitter in the Dominican lineup until he's already
+                    standing on that mound. <span class="about-highlight">Pitch Duel exists to change that.</span>
+                </p>
+
+                <hr class="about-divider">
+
+                <div class="about-cols">
+                    <div>
+                        <div class="about-col-head">How it works</div>
+                        <div class="about-col-body">
+                            The model is trained on over a decade of MLB Statcast pitch data and builds
+                            a behavioral profile for each named hitter — how they attack specific zones,
+                            which pitch families they struggle with, how their swing decisions shift by count.
+                            Input a pitch, pick a hitter, and the three-stage model predicts the probability
+                            the hitter swings, makes contact, and makes hard contact — along with a continuous
+                            xwOBA estimate for the quality of contact if it's made.
+                            Any pitcher anywhere in the world can now train against
+                            an AI version of the best hitters on the planet.
+                        </div>
+                    </div>
+                    <div>
+                        <div class="about-col-head">This demo vs. the full model</div>
+                        <div class="about-col-body">
+                            This demo uses <span style="color:#d29922;">manual pitch input</span> — you enter
+                            velocity, spin, movement, and location by hand.
+                            The production model is designed to connect directly to pitch tracking hardware:
+                            <span class="about-tag blue">Trackman</span>
+                            <span class="about-tag blue">Rapsodo</span>
+                            <span class="about-tag blue">Hawk-Eye</span>
+                            <br style="margin-bottom:6px;">
+                            In a live session, every pitch off the mound feeds into the model in real time —
+                            no manual entry, no delay. Select your target hitter before the session starts
+                            and get pitch-by-pitch feedback as you throw.
+                            The manual demo below lets you explore the model's output
+                            with any pitch profile you want to test.
+                        </div>
+                    </div>
+                </div>
+
+                <div id="about-extra" class="about-collapsible" style="max-height:0;">
+                    <hr class="about-divider">
+                    <p>
+                        Under the hood, the model runs three XGBoost classifiers in sequence —
+                        P(swing), P(contact&nbsp;|&nbsp;swing), P(hard&nbsp;contact&nbsp;|&nbsp;contact) —
+                        plus a parallel xwOBA regressor for contact quality.
+                        Each prediction draws on 80 features covering pitch mechanics, game context,
+                        and 50+ hitter-specific behavioral rates computed from Statcast data through 2025.
+                        A historical similarity lookup runs alongside the model and blends empirical
+                        outcomes from the hitter's real plate appearance history against pitches like yours.
+                    </p>
+                    <p>
+                        Hitter profiles are built from recency-weighted Statcast data — 2025 pitches count
+                        3× more than 2021 — so the model reflects how hitters look <em>today</em>, not
+                        who they were five years ago. Switch hitters are handled automatically:
+                        select the pitcher's handedness and the model bats them from the correct side.
+                        Hitters with thin MLB samples blend toward league-average baselines rather than
+                        producing unreliable predictions.
+                    </p>
+                    <p style="color:#6e7681;font-size:0.85em;">
+                        Current model: XGBoost v2 trained on 2015–2025 Statcast (2020 excluded) |
+                        Swing AUC 0.8807 · Contact AUC 0.8032 · Hard Contact AUC 0.7277
+                    </p>
+                </div>
+                <button class="about-toggle" onclick="toggleAbout(this)">+ show model details</button>
+            </div>
+        </div>
+
         <div class="tabs">
             <button class="tab-button active" onclick="switchTab('demo', this)">Prediction Demo</button>
             <button class="tab-button" onclick="switchTab('atbat', this)">At-Bat Builder</button>
@@ -209,12 +313,6 @@
                     </div>
                     <div class="form-group">
                         <label>Pitch Type</label>
-                        <div class="preset-row">
-                            <button class="preset-btn" onclick="applyPreset('demo','kbo_power')">KBO Power Arm</button>
-                            <button class="preset-btn" onclick="applyPreset('demo','kbo_finesse')">KBO Finesse LHP</button>
-                            <button class="preset-btn" onclick="applyPreset('demo','sweeper')">High-Spin Sweeper</button>
-                            <button class="preset-btn" onclick="applyPreset('demo','sinker')">Ground Ball Sinker</button>
-                        </div>
                         <select id="pitch_type_demo" onchange="applyPitchTypeDefaults('demo')">
                             <option>FF</option><option>SI</option><option>FC</option>
                             <option>SL</option><option>CU</option><option>CH</option>
@@ -489,6 +587,18 @@
             btn.textContent = el.classList.contains('open') ? '- Advanced pitch inputs' : '+ Advanced pitch inputs';
         }
 
+        function toggleAbout(btn) {
+            const el = document.getElementById('about-extra');
+            const open = el.style.maxHeight !== '0px' && el.style.maxHeight !== '';
+            if (open) {
+                el.style.maxHeight = '0';
+                btn.textContent = '+ show model details';
+            } else {
+                el.style.maxHeight = el.scrollHeight + 'px';
+                btn.textContent = '− hide model details';
+            }
+        }
+
         // ── Tab switching ────────────────────────────────────────────────────
         function switchTab(tabName, btn) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -638,8 +748,8 @@
             //   2. scale(flip*ts, ts): shrink + optional horizontal flip
             //   3. translate(cx,cy): position in SVG canvas
             let g = `<g transform="translate(${cx},${cy}) scale(${flip * ts},${ts}) translate(-100,-250)" opacity="0.35" fill-rule="nonzero">`;
-            g += `<path d="${BATTER_BODY_PATH}" fill="#8b949e"/>`;
             g += `<path d="${BATTER_BAT_PATH}" fill="#c9d1d9"/>`;
+            g += `<path d="${BATTER_BODY_PATH}" fill="#8b949e"/>`;
             g += `</g>`;
             return g;
         }
@@ -907,6 +1017,13 @@
                 <div style="margin-top:8px;font-size:0.85em;color:#8b949e;">
                     Composite P(hard contact) = ${(m.p_hard*100).toFixed(1)}%
                 </div>
+                ${(data.xwoba && data.xwoba.predicted_xwoba_on_contact !== null && data.xwoba.predicted_xwoba_on_contact !== undefined)
+                    ? `<div style="margin-top:6px;font-size:0.82em;color:#6e7681;">
+                        Contact quality: <span style="color:#c9d1d9;">${data.xwoba.predicted_xwoba_on_contact.toFixed(3)} xwOBA</span>
+                        — ${data.xwoba.xwoba_context}
+                       </div>`
+                    : ''
+                }
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:15px;">`;
 
             for (const [stage, stageLabel] of [['swing','Swing Drivers'],['contact','Contact Drivers'],['hard_contact','Hard Contact Drivers']]) {
@@ -1128,8 +1245,8 @@
                                oninput="ab_pitches[${idx}].plate_x=parseFloat(this.value); syncAbPicker();">
                         <input type="number" id="ab_pz_${idx}" step="0.1" value="2.5" placeholder="Plate Z"
                                oninput="ab_pitches[${idx}].plate_z=parseFloat(this.value); syncAbPicker();">
-                        <button class="secondary" style="padding:8px 12px;width:auto;" onclick="throwPitch(${idx})">Throw</button>
-                        <button class="adv-toggle" style="padding:6px 8px;margin:0;" onclick="toggleAdv('ab_adv_${idx}', this)">+</button>
+                        <button style="padding:8px 12px;width:auto;background:#1f6feb;color:#fff;" onmouseover="this.style.background='#388bfd'" onmouseout="this.style.background='#1f6feb'" onclick="throwPitch(${idx})">Throw</button>
+                        <button class="adv-toggle" style="padding:6px 10px;margin:0;" onclick="toggleAdv('ab_adv_${idx}', this)">+ Advanced pitch inputs</button>
                     </div>
                     <div class="adv-section" id="ab_adv_${idx}" style="margin-top:8px;margin-bottom:0;">
                         <div class="form-row" style="margin-bottom:0;">

@@ -80,19 +80,21 @@ _cache: dict = {}
 
 def load_models(model_dir: Path = MODEL_DIR) -> tuple:
     """
-    Load and cache all three (model, calibrator) pairs plus shared artifacts.
+    Load and cache all three classifier pairs plus the xwOBA regressor and shared artifacts.
 
-    Returns: (swing_pair, contact_pair, hard_contact_pair, feature_cols, encodings)
-    where each pair is (XGBClassifier, IsotonicRegression | None).
+    Returns: (swing_pair, contact_pair, hard_contact_pair, feature_cols, encodings, xwoba_pair)
+    where classifier pairs are (XGBClassifier, IsotonicRegression | None) and
+    xwoba_pair is (XGBRegressor | None, IsotonicRegression | None).
 
     Cache is keyed by model_dir so multiple model versions can coexist.
+    xwoba_pair is (None, None) if xwoba_model.json has not been trained yet.
     """
     cache_key = str(model_dir.resolve())
     if cache_key in _cache:
         c = _cache[cache_key]
         return (
             c["swing"], c["contact"], c["hard_contact"],
-            c["feature_cols"], c["encodings"],
+            c["feature_cols"], c["encodings"], c["xwoba"],
         )
 
     entry = {}
@@ -110,6 +112,17 @@ def load_models(model_dir: Path = MODEL_DIR) -> tuple:
         calibrator = joblib.load(cal_path) if cal_path.exists() else None
         entry[stage] = (model, calibrator)
 
+    # xwOBA regressor — optional; gracefully absent before first retrain
+    xwoba_path = model_dir / "xwoba_model.json"
+    if xwoba_path.exists():
+        xwoba_model = xgb.XGBRegressor()
+        xwoba_model.load_model(str(xwoba_path))
+        xwoba_cal_path = model_dir / "xwoba_calibrator.pkl"
+        xwoba_cal = joblib.load(xwoba_cal_path) if xwoba_cal_path.exists() else None
+        entry["xwoba"] = (xwoba_model, xwoba_cal)
+    else:
+        entry["xwoba"] = (None, None)
+
     with open(model_dir / "feature_cols.json") as f:
         entry["feature_cols"] = json.load(f)
     with open(model_dir / "encodings.json") as f:
@@ -119,7 +132,7 @@ def load_models(model_dir: Path = MODEL_DIR) -> tuple:
 
     return (
         entry["swing"], entry["contact"], entry["hard_contact"],
-        entry["feature_cols"], entry["encodings"],
+        entry["feature_cols"], entry["encodings"], entry["xwoba"],
     )
 
 
@@ -443,6 +456,21 @@ def interpret_pitch(
 
 
 # ---------------------------------------------------------------------------
+# xwOBA context interpretation
+# ---------------------------------------------------------------------------
+
+def _xwoba_context(xwoba: float) -> str:
+    if xwoba < 0.150:
+        return "weak contact expected"
+    elif xwoba < 0.300:
+        return "average contact"
+    elif xwoba < 0.450:
+        return "solid contact territory"
+    else:
+        return "extra-base hit territory"
+
+
+# ---------------------------------------------------------------------------
 # Main prediction entry point
 # ---------------------------------------------------------------------------
 
@@ -471,10 +499,11 @@ def predict_pitch(
         }
     """
     validate_pitch_dict(pitch)
-    swing_pair, contact_pair, hc_pair, feature_cols, encodings = load_models(model_dir)
+    swing_pair, contact_pair, hc_pair, feature_cols, encodings, xwoba_pair = load_models(model_dir)
     swing_model, swing_cal = swing_pair
     contact_model, contact_cal = contact_pair
     hc_model, hc_cal = hc_pair
+    xwoba_model, xwoba_cal = xwoba_pair
 
     hitter_features, is_thin, used_fallback = _resolve_hitter_profile(hitter_name)
     contextual_features = _resolve_contextual_hitter_features(pitch, hitter_features)
@@ -503,6 +532,16 @@ def predict_pitch(
     quality = interpret_pitch(p_swing, p_contact, p_hard_given_con, px, pz)
     zone    = _classify_zone(px, pz)
 
+    # xwOBA regressor (Stage 4 — parallel output, not part of the cascade)
+    predicted_xwoba = None
+    context_xwoba   = None
+    if xwoba_model is not None:
+        raw_xwoba = float(xwoba_model.predict(row)[0])
+        if xwoba_cal is not None:
+            raw_xwoba = float(xwoba_cal.predict([raw_xwoba])[0])
+        predicted_xwoba = float(np.clip(raw_xwoba, 0.0, 2.0))
+        context_xwoba   = _xwoba_context(predicted_xwoba)
+
     return {
         "p_swing":               round(p_swing, 4),
         "p_contact_given_swing": round(p_contact_given_sw, 4),
@@ -516,6 +555,8 @@ def predict_pitch(
         "count":                 f"{pitch['balls']}-{pitch['strikes']}",
         "is_thin_sample":        is_thin,
         "used_fallback":         used_fallback,
+        "predicted_xwoba_on_contact": round(predicted_xwoba, 3) if predicted_xwoba is not None else None,
+        "xwoba_context":         context_xwoba,
     }
 
 

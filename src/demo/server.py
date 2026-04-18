@@ -70,7 +70,7 @@ def _load_importances(model_dir: Path = None):
     if cache_key in _IMPORTANCES_CACHE:
         return _IMPORTANCES_CACHE[cache_key]
 
-    swing_pair, contact_pair, hc_pair, feature_cols, encodings = load_models(model_dir)
+    swing_pair, contact_pair, hc_pair, feature_cols, encodings, _xwoba = load_models(model_dir)
     result = {}
     for stage_name, (model, _cal) in [("swing", swing_pair), ("contact", contact_pair), ("hard_contact", hc_pair)]:
         imp = model.feature_importances_
@@ -377,6 +377,15 @@ def predict_demo():
                 "quality_color": color,
                 "pitch_quality": mr.pitch_type,
                 "summary": _verdict_text(mr, danger),
+            },
+
+            # xwOBA regressor (parallel output — None if model not yet trained)
+            "xwoba": {
+                "predicted_xwoba_on_contact": (
+                    round(mr.predicted_xwoba_on_contact, 3)
+                    if mr.predicted_xwoba_on_contact is not None else None
+                ),
+                "xwoba_context": mr.xwoba_context,
             },
         }
 

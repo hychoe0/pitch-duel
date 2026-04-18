@@ -604,11 +604,13 @@ def add_contextual_hitter_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def make_three_stage_targets(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add three binary target columns for three-stage hitter behavior modeling.
+    Add binary target columns for three-stage hitter behavior modeling plus
+    a continuous xwOBA regression target for in-play contact.
 
     Stage 1 — target_swing:  did the hitter swing? (all pitches)
     Stage 2 — target_contact: did they make contact? (meaningful on swings only)
     Stage 3 — target_hard_contact: was it hard hit ≥ 95 mph? (meaningful on in-play only)
+    Stage 4 — target_xwoba_on_contact: continuous xwOBA (in-play rows only; NaN elsewhere)
 
     The existing 'hit' and 'xwoba' columns are preserved unchanged.
     """
@@ -619,12 +621,24 @@ def make_three_stage_targets(df: pd.DataFrame) -> pd.DataFrame:
         & df["description"].isin(IN_PLAY_DESCRIPTIONS)
     ).astype(int)
 
+    # xwOBA regression target — NaN preserved for non-in-play rows.
+    # Do NOT fill NaN with 0: drop NaN rows at training time instead.
+    df["target_xwoba_on_contact"] = df["estimated_woba_using_speedangle"]
+    contact_mask = df["description"].isin(IN_PLAY_DESCRIPTIONS)
+    n_contact = int(contact_mask.sum())
+    n_valid   = int(df.loc[contact_mask, "target_xwoba_on_contact"].notna().sum())
+    n_nan     = n_contact - n_valid
+
     swing_rate   = df["target_swing"].mean()
     contact_rate = df[df["target_swing"] == 1]["target_contact"].mean()
     hc_rate      = df[df["target_contact"] == 1]["target_hard_contact"].mean()
     print(
         f"Three-stage targets: swing={swing_rate:.3f}, "
         f"contact|swing={contact_rate:.3f}, hard|contact={hc_rate:.3f}"
+    )
+    print(
+        f"xwOBA on contact: {n_valid:,} valid / {n_nan:,} NaN "
+        f"out of {n_contact:,} in-play rows"
     )
     return df
 

@@ -64,6 +64,10 @@ class MatchupResult:
     pitch_type: str
     count: str
 
+    # xwOBA regressor output (parallel to stages 1-3; None if model not trained)
+    predicted_xwoba_on_contact: float = None
+    xwoba_context: str = None
+
     # Evidence (optional, for display)
     top_similar_pitches: list = field(default_factory=list)
     outcome_distribution: dict = field(default_factory=dict)
@@ -103,6 +107,8 @@ def predict_matchup(
     m_contact = model_result["p_contact_given_swing"]
     m_hard    = model_result["p_hard_given_contact"]
     m_p_hard  = model_result["p_hard_contact"]
+    m_xwoba         = model_result.get("predicted_xwoba_on_contact")
+    m_xwoba_context = model_result.get("xwoba_context")
 
     # -- Path B: historical similarity lookup --
     h_swing = 0.0
@@ -196,6 +202,9 @@ def predict_matchup(
         pitch_type=pitch.get("pitch_type", "?"),
         count=count_str,
 
+        predicted_xwoba_on_contact=m_xwoba,
+        xwoba_context=m_xwoba_context,
+
         top_similar_pitches=top_pitches,
         outcome_distribution=outcome_dist,
     )
@@ -228,6 +237,11 @@ def _print_matchup(r: MatchupResult, velo: float) -> None:
         f"  {'P(hard contact)':<20} {r.p_hard:.2f}  "
         f"(blend weight alpha={r.alpha:.2f})"
     )
+    if r.predicted_xwoba_on_contact is not None:
+        print(
+            f"  {'xwOBA on contact':<20} {r.predicted_xwoba_on_contact:.3f}  "
+            f"({r.xwoba_context})"
+        )
     print()
 
     if r.top_similar_pitches:

@@ -1,11 +1,13 @@
 """
-train.py — Three-stage hitter behavior XGBoost classifiers.
+train.py — Three-stage hitter behavior XGBoost classifiers + xwOBA regressor.
 
 Stage 1: P(swing)              — all pitches
 Stage 2: P(contact | swing)    — swings only
 Stage 3: P(hard_contact | contact) — in-play contact only
+Stage 4: xwOBA on contact      — XGBRegressor, in-play rows only (parallel to stages 1-3)
 
-Each stage is an XGBClassifier with isotonic calibration on the 2024 val set.
+Each classifier uses isotonic calibration on the 2024 val set.
+The xwOBA regressor uses isotonic calibration to smooth regression outputs.
 
 Usage:
     python -m src.model.train
@@ -181,6 +183,103 @@ def train_one_stage(
 
 
 # ---------------------------------------------------------------------------
+# xwOBA regressor (Stage 4 — parallel to stages 1-3)
+# ---------------------------------------------------------------------------
+
+def train_xwoba_stage(
+    fit_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    col_medians: pd.Series,
+) -> dict:
+    """
+    Train an XGBRegressor to predict xwOBA on in-play contact.
+
+    Runs in parallel to the three classifiers — does not replace or modify them.
+    Uses the same ALL_FEATURES feature set and same hyperparameters as Stage 3.
+    Rows with NaN target_xwoba_on_contact are dropped (not filled).
+
+    Returns dict with model, calibrator, pearson_r, mae.
+    """
+    target_col = "target_xwoba_on_contact"
+
+    print(f"\n{'─' * 60}")
+    print("Stage XWOBA — xwOBA regressor on in-play contact (parallel)")
+    print(f"{'─' * 60}")
+
+    if target_col not in fit_df.columns:
+        raise ValueError(
+            f"'{target_col}' not in data. Re-run preprocess.py to add it."
+        )
+
+    # Filter to in-play rows with a valid (non-NaN) xwOBA value
+    ip_fit  = fit_df[fit_df["description"].isin(IN_PLAY_DESCRIPTIONS) & fit_df[target_col].notna()].copy()
+    ip_val  = val_df[val_df["description"].isin(IN_PLAY_DESCRIPTIONS) & val_df[target_col].notna()].copy()
+    ip_test = test_df[test_df["description"].isin(IN_PLAY_DESCRIPTIONS) & test_df[target_col].notna()].copy()
+
+    print(f"  In-play rows — fit: {len(ip_fit):,}  val: {len(ip_val):,}  test: {len(ip_test):,}")
+    print(f"  Target mean  — fit: {ip_fit[target_col].mean():.3f}  "
+          f"val: {ip_val[target_col].mean():.3f}  test: {ip_test[target_col].mean():.3f}")
+
+    ip_fit,  _ = _fill_nan(ip_fit,  col_medians)
+    ip_val,  _ = _fill_nan(ip_val,  col_medians)
+    ip_test, _ = _fill_nan(ip_test, col_medians)
+
+    X_fit  = ip_fit[ALL_FEATURES].values
+    y_fit  = ip_fit[target_col].values
+    w_fit  = ip_fit["sample_weight"].values if "sample_weight" in ip_fit.columns else np.ones(len(ip_fit))
+    X_val  = ip_val[ALL_FEATURES].values
+    y_val  = ip_val[target_col].values
+    X_test = ip_test[ALL_FEATURES].values
+    y_test = ip_test[target_col].values
+
+    params = {
+        "n_estimators": 500,
+        "max_depth": 6,
+        "learning_rate": 0.05,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "min_child_weight": 50,
+        "eval_metric": "mae",
+        "random_state": 42,
+        "n_jobs": -1,
+        "tree_method": "hist",
+        "early_stopping_rounds": 30,
+    }
+    model = xgb.XGBRegressor(**params)
+    model.fit(
+        X_fit, y_fit,
+        sample_weight=w_fit,
+        eval_set=[(X_val, y_val)],
+        verbose=50,
+    )
+    print(f"  Best iteration: {model.best_iteration}")
+
+    # Evaluate on test set
+    test_preds = model.predict(X_test)
+    r   = float(np.corrcoef(y_test, test_preds)[0, 1])
+    mae = float(np.abs(y_test - test_preds).mean())
+    print(f"  Test Pearson r: {r:.4f}")
+    print(f"  Test MAE: {mae:.4f}")
+    print(f"  Mean predicted xwOBA: {test_preds.mean():.4f}  vs actual: {y_test.mean():.4f}")
+
+    # Isotonic calibration on val set (smooths regression outputs monotonically)
+    val_preds  = model.predict(X_val)
+    calibrator = IsotonicRegression(out_of_bounds="clip")
+    calibrator.fit(val_preds, y_val)
+    cal_val = calibrator.predict(val_preds)
+    print(f"  Calibration — val mean: raw={val_preds.mean():.4f}  "
+          f"cal={cal_val.mean():.4f}  actual={y_val.mean():.4f}")
+
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    model.save_model(str(MODEL_DIR / "xwoba_model.json"))
+    joblib.dump(calibrator, MODEL_DIR / "xwoba_calibrator.pkl")
+    print("  Saved: xwoba_model.json, xwoba_calibrator.pkl")
+
+    return {"model": model, "calibrator": calibrator, "pearson_r": r, "mae": mae}
+
+
+# ---------------------------------------------------------------------------
 # Full training pipeline
 # ---------------------------------------------------------------------------
 
@@ -234,6 +333,9 @@ def run_training() -> dict:
     print(f"\n  [hard_contact] In-play subsets — fit: {len(fit_contact):,}  val: {len(val_contact):,}  test: {len(test_contact):,}")
     s3 = train_one_stage("hard_contact", "target_hard_contact", fit_contact, val_contact, test_contact, col_medians)
 
+    # ── Stage 4: xwOBA regressor (parallel — does not replace stages 1-3) ───
+    s4 = train_xwoba_stage(fit_df, val_df, test_df, col_medians)
+
     # ── Shared artifacts ─────────────────────────────────────────────────────
     with open(MODEL_DIR / "feature_cols.json", "w") as f:
         json.dump(ALL_FEATURES, f, indent=2)
@@ -247,6 +349,8 @@ def run_training() -> dict:
         "contact_rate":     round(s2["rate"], 4),
         "hard_contact_auc": round(s3["auc"], 4),
         "hard_contact_rate": round(s3["rate"], 4),
+        "xwoba_pearson_r":  round(s4["pearson_r"], 4),
+        "xwoba_mae":        round(s4["mae"], 4),
     }
     with open(MODEL_DIR / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -258,12 +362,14 @@ def run_training() -> dict:
     print(f"  Stage 1 — P(swing)             AUC: {s1['auc']:.4f}  rate: {s1['rate']:.3f}")
     print(f"  Stage 2 — P(contact|swing)     AUC: {s2['auc']:.4f}  rate: {s2['rate']:.3f}")
     print(f"  Stage 3 — P(hard_contact|con.) AUC: {s3['auc']:.4f}  rate: {s3['rate']:.3f}")
+    print(f"  Stage 4 — xwOBA regressor      r:   {s4['pearson_r']:.4f}  MAE: {s4['mae']:.4f}  [parallel]")
     print(f"\n  Artifacts saved to {MODEL_DIR}/")
 
     return {
         "swing": s1["model"], "swing_cal": s1["calibrator"],
         "contact": s2["model"], "contact_cal": s2["calibrator"],
         "hard_contact": s3["model"], "hard_contact_cal": s3["calibrator"],
+        "xwoba": s4["model"], "xwoba_cal": s4["calibrator"],
         "metrics": metrics,
     }
 
