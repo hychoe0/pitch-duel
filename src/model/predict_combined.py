@@ -65,6 +65,10 @@ class MatchupResult:
     count: str
 
     # xwOBA regressor output (parallel to stages 1-3; None if model not trained)
+    # predicted_xwoba_per_pitch is the canonical per-pitch field (range ~0.04–0.15).
+    # predicted_xwoba_on_contact is kept as None for backward compat with server.py
+    # and validate_aaa_profiles.py until those callers are updated.
+    predicted_xwoba_per_pitch:  float = None
     predicted_xwoba_on_contact: float = None
     xwoba_context: str = None
 
@@ -90,6 +94,8 @@ def predict_matchup(
     hitter_name: str,
     model_dir: Path = MODEL_DIR,
     show_evidence: bool = True,
+    league: str = "MLB",
+    fallback_to_mlb: bool = True,
 ) -> MatchupResult:
     """
     Run both model prediction and historical similarity lookup,
@@ -102,12 +108,12 @@ def predict_matchup(
     from src.hitters.similarity import find_similar_pitches
 
     # -- Path A: model prediction --
-    model_result = predict_pitch(pitch, hitter_name, model_dir)
+    model_result = predict_pitch(pitch, hitter_name, model_dir, league=league, fallback_to_mlb=fallback_to_mlb)
     m_swing   = model_result["p_swing"]
     m_contact = model_result["p_contact_given_swing"]
     m_hard    = model_result["p_hard_given_contact"]
     m_p_hard  = model_result["p_hard_contact"]
-    m_xwoba         = model_result.get("predicted_xwoba_on_contact")
+    m_xwoba         = model_result.get("predicted_xwoba_per_pitch")
     m_xwoba_context = model_result.get("xwoba_context")
 
     # -- Path B: historical similarity lookup --
@@ -202,7 +208,8 @@ def predict_matchup(
         pitch_type=pitch.get("pitch_type", "?"),
         count=count_str,
 
-        predicted_xwoba_on_contact=m_xwoba,
+        predicted_xwoba_per_pitch=m_xwoba,
+        predicted_xwoba_on_contact=None,  # LEGACY — always None; use predicted_xwoba_per_pitch
         xwoba_context=m_xwoba_context,
 
         top_similar_pitches=top_pitches,
@@ -237,9 +244,9 @@ def _print_matchup(r: MatchupResult, velo: float) -> None:
         f"  {'P(hard contact)':<20} {r.p_hard:.2f}  "
         f"(blend weight alpha={r.alpha:.2f})"
     )
-    if r.predicted_xwoba_on_contact is not None:
+    if r.predicted_xwoba_per_pitch is not None:
         print(
-            f"  {'xwOBA on contact':<20} {r.predicted_xwoba_on_contact:.3f}  "
+            f"  {'xwOBA per pitch':<20} {r.predicted_xwoba_per_pitch:.3f}  "
             f"({r.xwoba_context})"
         )
     print()
