@@ -45,9 +45,10 @@ import joblib
 import numpy as np
 import xgboost as xgb
 
-MODEL_DIR    = Path("models")
-PROFILE_DIR  = Path("data/processed/profiles")
-PROCESSED_PATH = Path("data/processed/statcast_processed.parquet")
+MODEL_DIR       = Path("models")
+PROFILE_DIR     = Path("data/processed/profiles")
+AAA_PROFILE_DIR = Path("data/processed/profiles/aaa")
+PROCESSED_PATH  = Path("data/processed/statcast_processed.parquet")
 
 REQUIRED_RAW_KEYS = [
     "release_speed", "release_spin_rate", "pfx_x", "pfx_z",
@@ -362,11 +363,23 @@ def _resolve_contextual_hitter_features(
 # Hitter profile resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_hitter_profile(hitter_name: str):
+def _resolve_hitter_profile(
+    hitter_name: str,
+    league: str = "MLB",
+    fallback_to_mlb: bool = True,
+):
     """
-    Load a pre-built profile by name. Falls back to league average if not found.
+    Load a pre-built profile by name.
+
+    league="MLB" (default): looks in data/processed/profiles/ only.
+    league="AAA": looks in data/processed/profiles/aaa/ first; if not found
+                  and fallback_to_mlb=True, falls back to the MLB profile dir.
+    Falls back to league-average profile if still not found.
+
     Returns (feature_dict, is_thin_sample, used_fallback).
     """
+    import json as _json
+
     from src.hitters.profiles import (
         get_league_average_profile,
         get_player_id,
@@ -374,28 +387,41 @@ def _resolve_hitter_profile(hitter_name: str):
         profile_to_feature_dict,
     )
 
+    # Ordered list of directories to search, based on requested league
+    if league.upper() == "AAA":
+        search_dirs = [AAA_PROFILE_DIR, PROFILE_DIR] if fallback_to_mlb else [AAA_PROFILE_DIR]
+    else:
+        search_dirs = [PROFILE_DIR]
+
+    # Attempt name → ID lookup using parquet (if available)
+    pid = None
     try:
         import pandas as pd
         df = pd.read_parquet(PROCESSED_PATH, columns=["batter", "player_name"])
         pid = get_player_id(hitter_name, df)
-        profile = load_profile(pid, PROFILE_DIR)
-        return profile_to_feature_dict(profile), profile.is_thin_sample, False
-    except FileNotFoundError:
-        pass
-    except ValueError:
-        pass
-
-    # Fallback: scan profile JSONs directly (works without the parquet)
-    try:
-        import json
-        for path in PROFILE_DIR.glob("*.json"):
-            with open(path) as f:
-                data = json.load(f)
-            if data.get("player_name", "").lower() == hitter_name.lower():
-                profile = load_profile(data["player_id"], PROFILE_DIR)
-                return profile_to_feature_dict(profile), profile.is_thin_sample, False
     except Exception:
         pass
+
+    # If we resolved a player ID, try loading from ordered dirs
+    if pid is not None:
+        for d in search_dirs:
+            try:
+                profile = load_profile(pid, d)
+                return profile_to_feature_dict(profile), profile.is_thin_sample, False
+            except FileNotFoundError:
+                continue
+
+    # Fallback: name-match scan across all search dirs (works without parquet)
+    for d in search_dirs:
+        for path in d.glob("*.json"):
+            try:
+                with open(path) as f:
+                    data = _json.load(f)
+                if data.get("player_name", "").lower() == hitter_name.lower():
+                    profile = load_profile(data["player_id"], d)
+                    return profile_to_feature_dict(profile), profile.is_thin_sample, False
+            except Exception:
+                continue
 
     warnings.warn(
         f"Hitter '{hitter_name}' not found — using league-average profile.",
@@ -460,14 +486,17 @@ def interpret_pitch(
 # ---------------------------------------------------------------------------
 
 def _xwoba_context(xwoba: float) -> str:
-    if xwoba < 0.150:
-        return "weak contact expected"
-    elif xwoba < 0.300:
-        return "average contact"
-    elif xwoba < 0.450:
-        return "solid contact territory"
+    """Classify per-pitch xwOBA (0.04–0.15 typical range) into human-readable tiers."""
+    if xwoba < 0.030:
+        return "minimal damage expected"
+    elif xwoba < 0.060:
+        return "below average risk"
+    elif xwoba < 0.100:
+        return "average per-pitch risk"
+    elif xwoba < 0.150:
+        return "above average risk"
     else:
-        return "extra-base hit territory"
+        return "high damage potential"
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +507,8 @@ def predict_pitch(
     pitch: dict,
     hitter_name: str,
     model_dir: Path = MODEL_DIR,
+    league: str = "MLB",
+    fallback_to_mlb: bool = True,
 ) -> dict:
     """
     Run three-stage prediction for a single pitch against a named hitter.
@@ -505,7 +536,9 @@ def predict_pitch(
     hc_model, hc_cal = hc_pair
     xwoba_model, xwoba_cal = xwoba_pair
 
-    hitter_features, is_thin, used_fallback = _resolve_hitter_profile(hitter_name)
+    hitter_features, is_thin, used_fallback = _resolve_hitter_profile(
+        hitter_name, league=league, fallback_to_mlb=fallback_to_mlb
+    )
     contextual_features = _resolve_contextual_hitter_features(pitch, hitter_features)
     combined_features = {**hitter_features, **contextual_features}
     row = build_feature_row(pitch, combined_features, feature_cols, encodings)
@@ -533,14 +566,21 @@ def predict_pitch(
     zone    = _classify_zone(px, pz)
 
     # xwOBA regressor (Stage 4 — parallel output, not part of the cascade)
-    predicted_xwoba = None
-    context_xwoba   = None
+    #
+    # Field semantics:
+    #   predicted_xwoba_per_pitch — CANONICAL. Per-pitch expected xwOBA trained on
+    #       all pitches (most=0.0 target). Typical range: 0.04–0.15. Use this field.
+    #   predicted_xwoba_on_contact — LEGACY. Always None; kept so callers that
+    #       reference it by name don't KeyError. Will be removed in a future cleanup
+    #       once all downstream callers (server.py, validate_aaa_profiles.py) are updated.
+    predicted_xwoba_per_pitch = None
+    context_xwoba             = None
     if xwoba_model is not None:
         raw_xwoba = float(xwoba_model.predict(row)[0])
         if xwoba_cal is not None:
             raw_xwoba = float(xwoba_cal.predict([raw_xwoba])[0])
-        predicted_xwoba = float(np.clip(raw_xwoba, 0.0, 2.0))
-        context_xwoba   = _xwoba_context(predicted_xwoba)
+        predicted_xwoba_per_pitch = float(np.clip(raw_xwoba, 0.0, 2.0))
+        context_xwoba             = _xwoba_context(predicted_xwoba_per_pitch)
 
     return {
         "p_swing":               round(p_swing, 4),
@@ -555,9 +595,31 @@ def predict_pitch(
         "count":                 f"{pitch['balls']}-{pitch['strikes']}",
         "is_thin_sample":        is_thin,
         "used_fallback":         used_fallback,
-        "predicted_xwoba_on_contact": round(predicted_xwoba, 3) if predicted_xwoba is not None else None,
+        "predicted_xwoba_per_pitch":  (
+            round(predicted_xwoba_per_pitch, 3)
+            if predicted_xwoba_per_pitch is not None else None
+        ),
+        "predicted_xwoba_on_contact": None,  # LEGACY — see field semantics note above
         "xwoba_context":         context_xwoba,
     }
+
+
+def predict_xwoba(
+    pitch: dict,
+    hitter_name: str,
+    model_dir: Path = MODEL_DIR,
+    league: str = "MLB",
+    fallback_to_mlb: bool = True,
+) -> float | None:
+    """
+    Return predicted per-pitch xwOBA for a single pitch against a named hitter.
+
+    Returns None if the xwOBA model has not been trained yet.
+    Thin wrapper around predict_pitch() for callers who only want the xwOBA value.
+    """
+    result = predict_pitch(pitch, hitter_name, model_dir, league=league,
+                           fallback_to_mlb=fallback_to_mlb)
+    return result.get("predicted_xwoba_per_pitch")
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +645,16 @@ def _find_weakest_hitter(profile_dir: Path) -> str:
             best_rate = rate
             best_name = data.get("player_name", "")
     return best_name or "league average"
+
+
+def list_available_hitters(league: str = "MLB") -> list[str]:
+    """
+    Return sorted list of hitter names with saved profiles for the given league.
+    league="MLB" → data/processed/profiles/*.json
+    league="AAA" → data/processed/profiles/aaa/*.json
+    """
+    from src.hitters.profiles import list_available_hitters as _list
+    return _list(league)
 
 
 def _print_result(label: str, result: dict) -> None:
