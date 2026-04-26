@@ -815,6 +815,8 @@
         function swingColor(v)   { return v > 0.6 ? '#79c0ff' : v > 0.35 ? '#8b949e' : '#484f58'; }
         function contactColor(v) { return v > 0.6 ? '#db6d28' : v > 0.35 ? '#d29922' : '#3fb950'; }
         function hardColor2(v)   { return v > 0.35 ? '#f85149' : v > 0.20 ? '#db6d28' : v > 0.10 ? '#d29922' : '#3fb950'; }
+        // Per-pitch xwOBA: typical range 0.04-0.15; NOT comparable to season xwOBA (~0.310)
+        function xwobaColor(v)   { return v > 0.15 ? '#f85149' : v > 0.10 ? '#f0883e' : v > 0.05 ? '#d29922' : '#3fb950'; }
 
         function dangerBadgeClass(level) {
             if (level.includes('HIGH')) return 'danger-HIGH';
@@ -1016,9 +1018,13 @@
                     Composite P(hard contact) = ${(m.p_hard*100).toFixed(1)}%
                 </div>
                 ${(data.xwoba && data.xwoba.predicted_xwoba_per_pitch !== null && data.xwoba.predicted_xwoba_per_pitch !== undefined)
-                    ? `<div style="margin-top:6px;font-size:0.82em;color:#6e7681;">
-                        xwOBA per pitch: <span style="color:#c9d1d9;">${data.xwoba.predicted_xwoba_per_pitch.toFixed(3)}</span>
-                        — ${data.xwoba.xwoba_context}
+                    ? `<div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <div style="display:flex;align-items:baseline;gap:6px;">
+                            <span style="font-size:0.82em;color:#6e7681;">xwOBA per pitch</span>
+                            <span title="Per-pitch expected xwOBA. Values 0.04–0.15 are typical. NOT comparable to season xwOBA (~0.310)." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
+                            <span style="font-size:1.1em;font-weight:bold;color:${xwobaColor(data.xwoba.predicted_xwoba_per_pitch)};">${data.xwoba.predicted_xwoba_per_pitch.toFixed(3)}</span>
+                        </div>
+                        <span style="font-size:0.78em;color:#6e7681;">${data.xwoba.xwoba_context}</span>
                        </div>`
                     : ''
                 }
@@ -1160,6 +1166,15 @@
                 <div style="margin-top:10px;font-size:0.82em;color:#6e7681;">
                     Zone: ${v.zone.replace(/_/g, ' ')} | Final P(hard contact): ${(b.p_hard*100).toFixed(1)}%
                 </div>
+                ${(data.xwoba && data.xwoba.predicted_xwoba_per_pitch != null)
+                    ? `<div style="margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 10px;background:#0d1117;border-radius:4px;border:1px solid #21262d;">
+                        <span style="font-size:0.8em;color:#6e7681;">xwOBA per pitch</span>
+                        <span title="Per-pitch expected xwOBA. Values 0.04–0.15 are typical. NOT comparable to season xwOBA (~0.310)." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
+                        <span style="font-size:1.15em;font-weight:bold;color:${xwobaColor(data.xwoba.predicted_xwoba_per_pitch)};">${data.xwoba.predicted_xwoba_per_pitch.toFixed(3)}</span>
+                        <span style="font-size:0.8em;color:#6e7681;">${data.xwoba.xwoba_context}</span>
+                       </div>`
+                    : ''
+                }
             </div>`;
 
             const resultEl = document.getElementById('result_demo');
@@ -1556,11 +1571,37 @@
             else if (avg < 0.30) verdict = `Competitive at-bat vs ${hitter} — mixed danger levels.`;
             else verdict = `Sequence gave ${hitter} too many hard-contact opportunities.`;
 
+            // Top 3 highest-risk pitches by P(hard)
+            const ranked = pHards
+                .map((ph, i) => ({ i, ph }))
+                .sort((a, b) => b.ph - a.ph)
+                .slice(0, Math.min(3, pHards.length));
+
+            let top3Html = '';
+            if (ranked.length >= 2) {
+                top3Html = `<div style="margin-top:12px;border-top:1px solid #30363d;padding-top:10px;">
+                    <div style="font-size:0.82em;color:#f85149;font-weight:bold;margin-bottom:6px;">⚠ Top ${ranked.length} Highest-Risk Pitches</div>`;
+                for (let rank = 0; rank < ranked.length; rank++) {
+                    const { i, ph } = ranked[rank];
+                    const p = ab_pitches[i];
+                    const count = `${p.balls}-${p.strikes}`;
+                    const locX = p.plate_x >= 0 ? 'away' : 'in';
+                    const locZ = p.plate_z >= 2.5 ? 'up' : 'down';
+                    top3Html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:0.82em;">
+                        <span style="color:${dangerColor(ph)};font-weight:bold;min-width:20px;">#${rank+1}</span>
+                        <span>Pitch #${i+1}: <strong>${p.pitch_type}</strong> ${p.release_speed}mph, ${count} count, ${locX}/${locZ}</span>
+                        <span style="margin-left:auto;color:${dangerColor(ph)};font-weight:bold;">P(hard) ${(ph*100).toFixed(1)}%</span>
+                    </div>`;
+                }
+                top3Html += '</div>';
+            }
+
             let html = `<div class="at-bat-summary">
                 <p>Pitches thrown: <strong>${ab_results.length}</strong></p>
                 <p>Avg P(hard contact): <strong style="color:${dangerColor(avg)};">${(avg*100).toFixed(1)}%</strong></p>
                 <p>Safest pitch: <strong>#${bestIdx+1} ${ab_pitches[bestIdx].pitch_type} — ${(best*100).toFixed(1)}%</strong></p>
                 <p>Riskiest pitch: <strong>#${worstIdx+1} ${ab_pitches[worstIdx].pitch_type} — ${(worst*100).toFixed(1)}%</strong></p>
+                ${top3Html}
                 <p style="margin-top:10px;border-top:1px solid #30363d;padding-top:10px;"><strong>${verdict}</strong></p>
             </div>`;
             document.getElementById('ab_summary').innerHTML = html;
