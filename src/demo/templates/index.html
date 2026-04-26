@@ -198,20 +198,18 @@
         <!-- ================================================================ -->
         <div class="about-panel">
             <p class="about-lead">
-                <span class="about-highlight">Pitch Duel</span> is a competitive exposure simulator
-                that answers one question every pitcher on earth should be able to ask —
-                <em style="color:#c9d1d9;">"How does my pitch hold up against elite hitters?"</em>
+                <span class="about-highlight">Pitch Duel</span> is a competitive AI simulator
+                that answers one question for every pitcher:
+                <em style="color:#c9d1d9;">"How does my pitch hold up against specific hitters?"</em>
             </p>
 
             <div class="about-body">
                 <p>
-                    The idea started at the 2026 WBC. Watching international pitchers —
-                    many of them dominant in their home leagues — get exposed by MLB lineups
-                    in the first time they had ever faced that caliber of hitter at the professional level.
-                    Not because they weren't talented, but because they had never had the chance to train against it.
-                    A KBO ace with a 93 mph sinker and elite command has no way to know how that pitch plays
-                    against Ohtani, Judge, or a cleanup hitter in the Dominican lineup until he's already
-                    standing on that mound. <span class="about-highlight">Pitch Duel exists to change that.</span>
+                    The idea started from the 2026 WBC, watching international pitchers 
+                    (many of them are the best in their home leagues) getting exposed by MLB hitters with low confidence. 
+                    This was not because they weren't talented enough. I believe it was because they had never had the chance to train against them.
+                    I want this model to be a tool for pitchers everywhere to get that experience — to step onto the mound knowing exactly how their
+                    best stuff plays against the different hitters in the world, and to use that knowledge to prepare better and compete at a higher level.
                 </p>
 
                 <hr class="about-divider">
@@ -1017,9 +1015,9 @@
                 <div style="margin-top:8px;font-size:0.85em;color:#8b949e;">
                     Composite P(hard contact) = ${(m.p_hard*100).toFixed(1)}%
                 </div>
-                ${(data.xwoba && data.xwoba.predicted_xwoba_on_contact !== null && data.xwoba.predicted_xwoba_on_contact !== undefined)
+                ${(data.xwoba && data.xwoba.predicted_xwoba_per_pitch !== null && data.xwoba.predicted_xwoba_per_pitch !== undefined)
                     ? `<div style="margin-top:6px;font-size:0.82em;color:#6e7681;">
-                        Contact quality: <span style="color:#c9d1d9;">${data.xwoba.predicted_xwoba_on_contact.toFixed(3)} xwOBA</span>
+                        xwOBA per pitch: <span style="color:#c9d1d9;">${data.xwoba.predicted_xwoba_per_pitch.toFixed(3)}</span>
                         — ${data.xwoba.xwoba_context}
                        </div>`
                     : ''

@@ -381,9 +381,9 @@ def predict_demo():
 
             # xwOBA regressor (parallel output — None if model not yet trained)
             "xwoba": {
-                "predicted_xwoba_on_contact": (
-                    round(mr.predicted_xwoba_on_contact, 3)
-                    if mr.predicted_xwoba_on_contact is not None else None
+                "predicted_xwoba_per_pitch": (
+                    round(mr.predicted_xwoba_per_pitch, 3)
+                    if mr.predicted_xwoba_per_pitch is not None else None
                 ),
                 "xwoba_context": mr.xwoba_context,
             },
