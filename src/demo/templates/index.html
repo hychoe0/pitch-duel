@@ -223,7 +223,7 @@
                             which pitch families they struggle with, how their swing decisions shift by count.
                             Input a pitch, pick a hitter, and the three-stage model predicts the probability
                             the hitter swings, makes contact, and makes hard contact — along with a continuous
-                            xwOBA estimate for the quality of contact if it's made.
+                            expected damage estimate for the quality of contact if it's made.
                             Any pitcher anywhere in the world can now train against
                             an AI version of the best hitters on the planet.
                         </div>
@@ -252,7 +252,7 @@
                     <p>
                         Under the hood, the model runs three XGBoost classifiers in sequence —
                         P(swing), P(contact&nbsp;|&nbsp;swing), P(hard&nbsp;contact&nbsp;|&nbsp;contact) —
-                        plus a parallel xwOBA regressor for contact quality.
+                        plus a parallel expected-damage regressor for contact quality.
                         Each prediction draws on 80 features covering pitch mechanics, game context,
                         and 50+ hitter-specific behavioral rates computed from Statcast data through 2025.
                         A historical similarity lookup runs alongside the model and blends empirical
@@ -559,6 +559,8 @@
             const thinEl = document.getElementById(`hitter_card_${mode}_thin`);
             const statsEl = document.getElementById(`hitter_card_${mode}_stats`);
             try {
+                if (mode === 'demo')  _absZone_demo  = null;
+                if (mode === 'atbat') _absZone_atbat = null;
                 const res = await fetch(`/api/hitter_profile?name=${encodeURIComponent(name)}`);
                 if (!res.ok) return;
                 const p = await res.json();
@@ -576,6 +578,26 @@
                     `<div class="hitter-card-stat"><div class="v">${s.v}</div><div class="l">${s.l}</div></div>`
                 ).join('');
                 card.classList.add('loaded');
+
+                // Build ABS zone object with label for SVG display
+                const az = p.abs_zone ? { ...p.abs_zone } : null;
+                if (az) az.label = p.height_display ? `ABS zone — ${p.height_display}` : 'ABS zone';
+
+                if (mode === 'demo') {
+                    _absZone_demo = az;
+                    syncDemoZone();  // Redraw Tab 1 picker with new zone
+                }
+                if (mode === 'atbat') {
+                    _absZone_atbat = az;
+                    // Redraw Tab 2 picker with new zone
+                    const hitter = document.getElementById('hitter_atbat').value;
+                    const pThrows = document.getElementById('p_throws_atbat').value;
+                    const side = getEffectiveStand(hitter, pThrows);
+                    const sw = (HITTER_STAND[hitter] === 'S');
+                    document.getElementById('ab_picker_svg').innerHTML =
+                        buildPickerZoneSvg(400, 250, null, null, side, sw, _absZone_atbat);
+                    attachAbPickerClick();
+                }
             } catch (e) { console.error('hitter card error:', e); }
         }
 
@@ -694,14 +716,25 @@
         function buildZoneSvg(pitches, sz, opts = {}) {
             const showNumbers = opts.showNumbers !== false;
             const filters = opts.filters || {};
+            const absZone = opts.absZone || null;
             const r = sz >= 400 ? 14 : (sz >= 250 ? 10 : 8);
             const fs = sz >= 400 ? 11 : (sz >= 250 ? 8 : 7);
 
-            const zTL = pitchToSvg(SZ_X_MIN, SZ_Z_MAX, sz), zBR = pitchToSvg(SZ_X_MAX, SZ_Z_MIN, sz);
-            const cTL = pitchToSvg(SZ_X_MIN - CHASE_BORDER, SZ_Z_MAX + CHASE_BORDER, sz);
-            const cBR = pitchToSvg(SZ_X_MAX + CHASE_BORDER, SZ_Z_MIN - CHASE_BORDER, sz);
+            // Zone bounds: use ABS zone if provided, otherwise rulebook
+            const zXMin = absZone ? absZone.left_ft   : SZ_X_MIN;
+            const zXMax = absZone ? absZone.right_ft  : SZ_X_MAX;
+            const zZMin = absZone ? absZone.bottom_ft : SZ_Z_MIN;
+            const zZMax = absZone ? absZone.top_ft    : SZ_Z_MAX;
+
+            const zTL = pitchToSvg(zXMin, zZMax, sz), zBR = pitchToSvg(zXMax, zZMin, sz);
+            const cTL = pitchToSvg(zXMin - CHASE_BORDER, zZMax + CHASE_BORDER, sz);
+            const cBR = pitchToSvg(zXMax + CHASE_BORDER, zZMin - CHASE_BORDER, sz);
 
             let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;">`;
+            if (absZone) {
+                const zoneLabel = absZone.label || 'ABS zone';
+                svg += `<text x="4" y="10" font-size="8" font-family="Courier New" fill="#6e7681">${zoneLabel}</text>`;
+            }
             svg += `<rect x="${cTL.x}" y="${cTL.y}" width="${cBR.x-cTL.x}" height="${cBR.y-cTL.y}" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>`;
             svg += `<rect x="${zTL.x}" y="${zTL.y}" width="${zBR.x-zTL.x}" height="${zBR.y-zTL.y}" fill="none" stroke="#8b949e" stroke-width="2"/>`;
             const tw = (zBR.x-zTL.x)/3, th = (zBR.y-zTL.y)/3;
@@ -752,7 +785,7 @@
             return g;
         }
 
-        function buildPickerZoneSvg(w, h, markerX, markerZ, batterSide, isSwitch) {
+        function buildPickerZoneSvg(w, h, markerX, markerZ, batterSide, isSwitch, absZone) {
             // Zone is drawn based on h (height). Extra width provides space for batter silhouettes.
             const pad = (w - h) / 2;  // horizontal padding on each side
             // Offset pitch coords into the centered zone area
@@ -762,11 +795,22 @@
             }
             function fToPx(ft) { return ftToPx(ft, h); }
 
-            const zTL = pToSvg(SZ_X_MIN, SZ_Z_MAX), zBR = pToSvg(SZ_X_MAX, SZ_Z_MIN);
-            const cTL = pToSvg(SZ_X_MIN - CHASE_BORDER, SZ_Z_MAX + CHASE_BORDER);
-            const cBR = pToSvg(SZ_X_MAX + CHASE_BORDER, SZ_Z_MIN - CHASE_BORDER);
+            // Zone bounds: use ABS zone if provided, otherwise rulebook
+            const zXMin = absZone ? absZone.left_ft   : SZ_X_MIN;
+            const zXMax = absZone ? absZone.right_ft  : SZ_X_MAX;
+            const zZMin = absZone ? absZone.bottom_ft : SZ_Z_MIN;
+            const zZMax = absZone ? absZone.top_ft    : SZ_Z_MAX;
+
+            const zTL = pToSvg(zXMin, zZMax), zBR = pToSvg(zXMax, zZMin);
+            const cTL = pToSvg(zXMin - CHASE_BORDER, zZMax + CHASE_BORDER);
+            const cBR = pToSvg(zXMax + CHASE_BORDER, zZMin - CHASE_BORDER);
+
+            const zoneLabel = absZone
+                ? (absZone.label || 'ABS zone')
+                : 'Rulebook zone (height unknown)';
 
             let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;">`;
+            svg += `<text x="4" y="10" font-size="8" font-family="Courier New" fill="#6e7681">${zoneLabel}</text>`;
             svg += `<rect x="${cTL.x}" y="${cTL.y}" width="${cBR.x-cTL.x}" height="${cBR.y-cTL.y}" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>`;
             svg += `<rect x="${zTL.x}" y="${zTL.y}" width="${zBR.x-zTL.x}" height="${zBR.y-zTL.y}" fill="none" stroke="#8b949e" stroke-width="2"/>`;
             const tw = (zBR.x-zTL.x)/3, th = (zBR.y-zTL.y)/3;
@@ -788,7 +832,7 @@
                 const labelX = batterSide === 'R' ? w - 8 : 8;
                 const anchor = batterSide === 'R' ? 'end' : 'start';
                 const label = isSwitch ? `SW(${batterSide})` : `${batterSide}HH`;
-                svg += `<text x="${labelX}" y="14" text-anchor="${anchor}" fill="${isSwitch ? '#d29922' : '#484f58'}" font-size="${10*scale}px" font-family="Courier New">${label}</text>`;
+                svg += `<text x="${labelX}" y="24" text-anchor="${anchor}" fill="${isSwitch ? '#d29922' : '#484f58'}" font-size="${10*scale}px" font-family="Courier New">${label}</text>`;
             }
 
             if (markerX !== null && markerZ !== null) {
@@ -887,7 +931,7 @@
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
             const container = document.getElementById('demo_zone_picker');
-            container.innerHTML = buildPickerZoneSvg(400, 250, px, pz, side, sw);
+            container.innerHTML = buildPickerZoneSvg(400, 250, px, pz, side, sw, _absZone_demo);
             attachDemoZoneClick();
         }
 
@@ -1020,8 +1064,8 @@
                 ${(data.xwoba && data.xwoba.predicted_xwoba_per_pitch !== null && data.xwoba.predicted_xwoba_per_pitch !== undefined)
                     ? `<div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                         <div style="display:flex;align-items:baseline;gap:6px;">
-                            <span style="font-size:0.82em;color:#6e7681;">xwOBA per pitch</span>
-                            <span title="Per-pitch expected xwOBA. Values 0.04–0.15 are typical. NOT comparable to season xwOBA (~0.310)." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
+                            <span style="font-size:0.82em;color:#6e7681;">Expected damage (per-pitch)</span>
+                            <span title="Expected damage from this pitch alone, calibrated against actual MLB outcomes. Values 0.04–0.15 are typical per-pitch — much lower than season xwOBA (~0.310) because most individual pitches don't generate damage. Higher = more dangerous." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
                             <span style="font-size:1.1em;font-weight:bold;color:${xwobaColor(data.xwoba.predicted_xwoba_per_pitch)};">${data.xwoba.predicted_xwoba_per_pitch.toFixed(3)}</span>
                         </div>
                         <span style="font-size:0.78em;color:#6e7681;">${data.xwoba.xwoba_context}</span>
@@ -1099,7 +1143,7 @@
                             <thead><tr><th>Date</th><th>Type</th><th>Velo</th><th>Location</th><th>Outcome</th><th>EV</th><th>Sim</th></tr></thead>
                             <tbody>`;
                     for (const p of h.top_pitches) {
-                        const outcome = p.events || p.description;
+                        const outcome = p.outcome || p.events || p.description || 'Unknown';
                         const ev = p.launch_speed != null ? `${p.launch_speed.toFixed(0)} mph` : '-';
                         html += `<tr>
                             <td style="color:#6e7681;">${p.date}</td>
@@ -1168,8 +1212,8 @@
                 </div>
                 ${(data.xwoba && data.xwoba.predicted_xwoba_per_pitch != null)
                     ? `<div style="margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 10px;background:#0d1117;border-radius:4px;border:1px solid #21262d;">
-                        <span style="font-size:0.8em;color:#6e7681;">xwOBA per pitch</span>
-                        <span title="Per-pitch expected xwOBA. Values 0.04–0.15 are typical. NOT comparable to season xwOBA (~0.310)." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
+                        <span style="font-size:0.8em;color:#6e7681;">Expected damage (per-pitch)</span>
+                        <span title="Expected damage from this pitch alone, calibrated against actual MLB outcomes. Values 0.04–0.15 are typical per-pitch — much lower than season xwOBA (~0.310) because most individual pitches don't generate damage. Higher = more dangerous." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
                         <span style="font-size:1.15em;font-weight:bold;color:${xwobaColor(data.xwoba.predicted_xwoba_per_pitch)};">${data.xwoba.predicted_xwoba_per_pitch.toFixed(3)}</span>
                         <span style="font-size:0.8em;color:#6e7681;">${data.xwoba.xwoba_context}</span>
                        </div>`
@@ -1187,6 +1231,10 @@
         // ================================================================
         // TAB 2: At-Bat Builder
         // ================================================================
+
+        // Per-tab ABS strike zone (null = use rulebook fallback)
+        let _absZone_demo  = null;
+        let _absZone_atbat = null;
 
         let ab_pitches = [];      // raw pitch inputs
         let ab_results = [];      // prediction results per pitch
@@ -1211,7 +1259,7 @@
             const pThrows = document.getElementById('p_throws_atbat').value;
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
-            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(400, 200, null, null, side, sw);
+            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(400, 250, null, null, side, sw, _absZone_atbat);
         }
 
         function updateAbZone() {
@@ -1223,7 +1271,7 @@
                 speed: ab_pitches[i].release_speed,
                 p_hard: r.blend.p_hard,
             }));
-            document.getElementById('ab_zone_svg').innerHTML = buildZoneSvg(zonePitches, 250, {showNumbers: true});
+            document.getElementById('ab_zone_svg').innerHTML = buildZoneSvg(zonePitches, 250, {showNumbers: true, absZone: _absZone_atbat});
         }
 
         let ab_active_idx = null; // which pitch row the zone picker targets
@@ -1319,18 +1367,16 @@
         function syncAbPicker() {
             if (ab_active_idx === null || ab_active_idx >= ab_pitches.length) return;
             const pitch = ab_pitches[ab_active_idx];
-            // const sz = 200;
             const hitter = document.getElementById('hitter_atbat').value;
             const pThrows = document.getElementById('p_throws_atbat').value;
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
             const container = document.getElementById('ab_picker_svg');
-            container.innerHTML = buildPickerZoneSvg(400, 250, pitch.plate_x, pitch.plate_z, side, sw);
+            container.innerHTML = buildPickerZoneSvg(400, 250, pitch.plate_x, pitch.plate_z, side, sw, _absZone_atbat);
             attachAbPickerClick();
         }
 
         function attachAbPickerClick() {
-            // const sz = 200;
             const w = 400, h = 250;
             const pad = (w - h) / 2;
             const container = document.getElementById('ab_picker_svg');

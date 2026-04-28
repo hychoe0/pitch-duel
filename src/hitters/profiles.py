@@ -16,7 +16,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROFILE_DIR = Path("data/processed/profiles")
+PROFILE_DIR     = Path("data/processed/profiles")
+AAA_PROFILE_DIR = Path("data/processed/profiles/aaa")
 MIN_WEIGHTED_PA = 200  # weighted plate appearances; below this, blend with league averages
 
 # Standard strike zone bounds (universal approximation)
@@ -143,6 +144,7 @@ class HitterProfile:
     family_whiff_rates: dict = field(default_factory=dict)         # family_str -> float
     sample_size: int = 0
     is_thin_sample: bool = False
+    league: str = "MLB"  # "MLB" or "AAA"; default keeps old saved profiles loading correctly
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +656,140 @@ def merge_profiles_into_df(
 
     print(f"Profile features merged. Shape: {merged.shape}")
     return merged
+
+
+# ---------------------------------------------------------------------------
+# AAA profile building
+# ---------------------------------------------------------------------------
+
+def build_aaa_profile(
+    player_id: int,
+    df: pd.DataFrame,
+    date_cutoff: str = "2026-12-31",
+) -> HitterProfile:
+    """
+    Build an AAA HitterProfile. Internally delegates to build_profile() —
+    the statistics math is identical. Sets league="AAA" on the returned object.
+
+    date_cutoff defaults to end-of-current-year since AAA data has no leakage
+    risk with the trained model (model was trained on MLB data only).
+
+    MLB profile preference rule: callers should check PROFILE_DIR first.
+    This function only runs when no MLB profile is available.
+    """
+    profile = build_profile(player_id, df, date_cutoff)
+    profile.league = "AAA"
+    return profile
+
+
+def build_all_aaa_profiles(
+    df: pd.DataFrame,
+    output_dir: Path = AAA_PROFILE_DIR,
+    date_cutoff: str = "2026-12-31",
+    min_weighted_pa: float = MIN_WEIGHTED_PA,
+    force_rebuild: bool = False,
+) -> dict[int, HitterProfile]:
+    """
+    Build and save AAA profiles for all batters in df with sufficient sample.
+
+    MLB preference rule: skips any player_id that already has a saved MLB profile
+    in PROFILE_DIR (those hitters should be predicted with their MLB profile).
+
+    Returns {player_id: HitterProfile} for all successfully built AAA profiles.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    all_ids = df["batter"].unique().tolist()
+
+    # Resolve names in bulk (populates _NAME_CACHE)
+    _build_name_cache(all_ids)
+
+    # Identify batters with existing FULL (non-thin) MLB profiles — skip them.
+    # Batters with thin MLB profiles are still eligible for AAA profiles because
+    # their MLB sample is insufficient; AAA data may give a better read.
+    mlb_full_ids = set()
+    for p in PROFILE_DIR.glob("*.json"):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+            if not d.get("is_thin_sample", True):
+                mlb_full_ids.add(int(p.stem))
+        except Exception:
+            pass
+    aaa_only_ids = [pid for pid in all_ids if int(pid) not in mlb_full_ids]
+    n_skipped_mlb = len(all_ids) - len(aaa_only_ids)
+    print(
+        f"\nAAA profile build: {len(all_ids):,} unique batters  "
+        f"| {n_skipped_mlb:,} have full MLB profiles (skipped)  "
+        f"| {len(aaa_only_ids):,} candidates (thin-MLB or AAA-only)"
+    )
+
+    results: dict[int, HitterProfile] = {}
+    n_built = 0
+    n_thin  = 0
+    n_skip_sample = 0
+    n_skip_cached = 0
+
+    for player_id in aaa_only_ids:
+        pid = int(player_id)
+        out_path = output_dir / f"{pid}.json"
+
+        if out_path.exists() and not force_rebuild:
+            try:
+                profile = load_profile(pid, output_dir)
+                results[pid] = profile
+                n_skip_cached += 1
+                continue
+            except Exception:
+                out_path.unlink(missing_ok=True)
+
+        sub = df[df["batter"] == player_id].copy()
+        if len(sub) == 0:
+            continue
+
+        weighted_pa = _weighted_pa_count(sub)
+        if weighted_pa < min_weighted_pa * 0.5:
+            # Skip very thin samples (< 100 weighted PAs) outright
+            n_skip_sample += 1
+            continue
+
+        try:
+            profile = build_aaa_profile(pid, df, date_cutoff)
+            save_profile(profile, output_dir)
+            results[pid] = profile
+            n_built += 1
+            if profile.is_thin_sample:
+                n_thin += 1
+        except Exception as e:
+            print(f"  WARN: build_aaa_profile({pid}) failed — {e}")
+
+    print(
+        f"AAA profiles: {n_built} built ({n_thin} thin-sample blended)  "
+        f"| {n_skip_cached} from cache  "
+        f"| {n_skip_sample} skipped (< 100 weighted PAs)"
+    )
+    return results
+
+
+def list_available_hitters(league: str = "MLB") -> list[str]:
+    """
+    Return sorted list of hitter names with saved profiles for the given league.
+
+    league="MLB" → data/processed/profiles/*.json
+    league="AAA" → data/processed/profiles/aaa/*.json
+    """
+    profile_dir = AAA_PROFILE_DIR if league.upper() == "AAA" else PROFILE_DIR
+    names = []
+    for path in profile_dir.glob("*.json"):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            name = data.get("player_name", "")
+            if name:
+                names.append(name)
+        except Exception:
+            continue
+    return sorted(names)
 
 
 # ---------------------------------------------------------------------------

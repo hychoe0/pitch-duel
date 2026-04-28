@@ -20,6 +20,7 @@ from flask import Flask, jsonify, request, render_template
 
 from src.model.predict import predict_pitch, load_models, encode_pitch_dict, build_feature_row
 from src.model.predict_combined import predict_matchup
+from src.hitters.abs_zone import compute_abs_zone, get_height_inches
 from src.demo.at_bat import simulate_at_bat
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +87,39 @@ def _load_importances(model_dir: Path = None):
 ZONE_X_MIN, ZONE_X_MAX = -0.85, 0.85
 ZONE_Z_MIN, ZONE_Z_MAX = 1.5, 3.5
 CHASE_BORDER = 0.5
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Path B outcome labels
+# ──────────────────────────────────────────────────────────────────────────────
+
+_EVENT_LABELS = {
+    "single": "Single", "double": "Double", "triple": "Triple",
+    "home_run": "Home Run", "strikeout": "Strikeout",
+    "walk": "Walk", "intent_walk": "Walk (IBB)", "hit_by_pitch": "HBP",
+    "field_out": "Field Out", "grounded_into_double_play": "GIDP",
+    "force_out": "Force Out", "double_play": "Double Play",
+    "sac_fly": "Sac Fly", "fielders_choice": "Fielder's Choice",
+}
+_DESCRIPTION_LABELS = {
+    "ball": "Ball", "blocked_ball": "Ball (blocked)",
+    "called_strike": "Called Strike",
+    "swinging_strike": "Swinging Strike",
+    "swinging_strike_blocked": "Swinging Strike (blocked)",
+    "foul": "Foul", "foul_tip": "Foul Tip", "foul_bunt": "Foul Bunt",
+    "hit_into_play": "Ball in Play",
+    "missed_bunt": "Missed Bunt", "pitchout": "Pitchout",
+}
+
+
+def _resolve_pitch_outcome(p: dict) -> str:
+    ev   = str(p.get("events",      "") or "").strip()
+    desc = str(p.get("description", "") or "").strip()
+    if ev and ev != "nan":
+        return _EVENT_LABELS.get(ev, ev.replace("_", " ").title())
+    if desc and desc != "nan":
+        return _DESCRIPTION_LABELS.get(desc, desc.replace("_", " ").title())
+    return "Unknown"
 
 
 def classify_pitch_zone(plate_x: float, plate_z: float) -> str:
@@ -339,6 +373,8 @@ def predict_demo():
             "model_label": MODEL_VERSIONS.get(model_version, {}).get("label", "unknown"),
             "hitter": hitter_name,
             "hitter_profile": hitter_profile,
+            "abs_zone": hitter_profile.get("abs_zone"),
+            "hitter_height_inches": hitter_profile.get("height_inches"),
 
             # Path A: Model predictions
             "model": {
@@ -357,7 +393,10 @@ def predict_demo():
                 "p_hard": round(mr.historical_p_hard, 4),
                 "n_similar": mr.n_similar_pitches,
                 "confidence": round(mr.confidence, 4),
-                "top_pitches": mr.top_similar_pitches,
+                "top_pitches": [
+                    {**p, "outcome": _resolve_pitch_outcome(p)}
+                    for p in mr.top_similar_pitches
+                ],
                 "outcome_distribution": mr.outcome_distribution,
             },
 
@@ -402,6 +441,7 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
     from src.hitters.profiles import get_player_id, load_profile
 
     profile = None
+    pid = None
 
     # Try parquet-based lookup first
     try:
@@ -421,10 +461,16 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
                 with open(path) as f:
                     data = json.load(f)
                 if data.get("player_name", "").lower() == hitter_name.lower():
-                    profile = load_profile(data["player_id"], PROFILE_DIR)
+                    pid = data["player_id"]
+                    profile = load_profile(pid, PROFILE_DIR)
                     break
             except Exception:
                 continue
+
+    # Look up ABS zone (reads from local cache — no network call for demo hitters)
+    h_in = get_height_inches(pid) if pid is not None else None
+    abs_zone = compute_abs_zone(h_in) if h_in is not None else None
+    height_display = f"{h_in // 12}'{h_in % 12}\"" if h_in is not None else None
 
     if profile:
         return {
@@ -436,6 +482,9 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
             "whiff_rate": round(profile.whiff_rate, 3),
             "sample_size": profile.sample_size,
             "is_thin_sample": profile.is_thin_sample,
+            "height_inches": h_in,
+            "height_display": height_display,
+            "abs_zone": abs_zone,
         }
 
     return {
@@ -444,6 +493,9 @@ def _load_hitter_profile_for_display(hitter_name: str) -> dict:
         "contact_rate": 0.72, "hard_hit_rate": 0.35,
         "whiff_rate": 0.25, "sample_size": 0,
         "is_thin_sample": True,
+        "height_inches": None,
+        "height_display": None,
+        "abs_zone": None,
     }
 
 

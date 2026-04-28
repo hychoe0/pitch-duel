@@ -42,34 +42,87 @@ Zone rates use Statcast's native `zone` column. Pitch families: fastball (FF/SI/
 Fallback thresholds: 20 weighted pitches per zone, 30 per family.
 `stand` field: 'L', 'R', or 'S' (switch). Switch hitters bat opposite pitcher's hand. Detection: ≥10% minority-side appearances qualifies as 'S'.
 
+#### AAA Profiles (Task 2)
+- Source: Baseball Savant `sport_id=11` endpoint (2023–2026), ~2.19M pitches
+- Raw: `data/raw_minors/` (monthly CSVs + manifest.json)
+- Processed: `data/processed/statcast_minors_processed.parquet` (2.18M rows)
+- Profiles: `data/processed/profiles/aaa/` — 175 profiles built (47 thin-sample blended)
+- MLB preference rule: only skip players with a **full** (non-thin) MLB profile; thin-MLB players are eligible for AAA profiles
+- ABS descriptions normalized: `automatic_ball` → `ball`, `automatic_strike` → `called_strike`
+- AAA recency weights: 2026=3.0x, 2025=2.5x, 2024=2.0x, 2023=1.5x
+- `league="AAA"` in predict.py searches AAA dir first, then MLB (fallback_to_mlb=True)
+
 ### Current Performance (models_v2)
 - Swing AUC: **0.8807** | Contact AUC: **0.8032** | Hard Contact AUC: **0.7277**
 
 ## Project Structure
 ```
 pitch-duel/
-├── data/raw/                    # Statcast CSVs (gitignored)
-├── data/processed/              # parquet files, profiles/, profiles_demo/
+├── data/raw/                    # Statcast MLB CSVs (gitignored)
+├── data/raw_minors/             # Statcast AAA CSVs + manifest.json (gitignored)
+├── data/processed/              # parquet files, profiles/, profiles/aaa/, profiles_demo/
+├── data/synthetic/              # synthetic pitcher CSVs, per-league prediction CSVs
 ├── models_v2/                   # active: swing/contact/hard_contact .json + .pkl + metadata
 ├── models/                      # v1 archive (single hit-prob classifier)
-├── src/data/fetch.py            # Statcast download (monthly, idempotent)
+├── src/data/fetch.py            # Statcast MLB download (monthly, idempotent)
+├── src/data/fetch_minors.py     # Statcast AAA download (5-day chunks, idempotent)
 ├── src/data/preprocess.py       # cleaning, feature engineering, ALL_FEATURES
+├── src/data/preprocess_minors.py  # AAA cleaning + ABS normalization → parquet
 ├── src/model/train.py           # three-stage XGBoost training + calibration
-├── src/model/predict.py         # three-stage inference
+├── src/model/predict.py         # three-stage inference, league-aware profile lookup
+├── src/model/predict_combined.py  # blended model + similarity lookup
+├── src/model/report.py          # generate_league_report(), render_report() — per-league output
 ├── src/model/simulate_atbat.py  # at-bat sequence simulation
 ├── src/model/evaluate.py        # single-player evaluation
 ├── src/model/evaluate_expanded.py  # 20-player tiered validation
-├── src/hitters/profiles.py      # per-hitter profile build/save/load/merge
-└── src/demo/                    # Flask demo app (server.py + templates/)
+├── src/hitters/profiles.py      # per-hitter profile build/save/load/merge; AAA support
+├── src/demo/                    # Flask demo app (server.py + templates/)
+├── scripts/generate_synthetic_d1_pitcher.py  # 50-pitch Trackman CSV, seed=42
+├── scripts/run_synthetic_demo.py  # two separated per-league reports + CSVs
+├── scripts/validate_aaa_profiles.py  # 3-gate AAA profile reasonability check
+└── docs/aaa_data_investigation.md  # Phase 1 GO decision + API notes
 ```
 
 ## Key Constraints
 - venv at `./venv` — always use it
 - Raw data never committed (gitignored)
 - Delete `data/processed/profiles/` and rebuild whenever train/test split changes
-- Never use 2026+ data in profile construction
+- Never use 2026+ data in MLB profile construction (AAA profiles use full date range — no leakage risk since model was trained on MLB only)
 - Pitcher features disconnected — do not re-add without updating ALL_FEATURES and retraining
+- Do not print cross-tier comparisons or combined rankings — league reports are always separate
+
+## Validation Benchmarks (Task 1 — synthetic D1 RHP, seed=42)
+P(hard) averaged across 50 pitches (15 FF / 15 FC / 10 SL / 10 CH):
+
+| Hitter | P(hard) | Notes |
+|--------|---------|-------|
+| Shohei Ohtani | 0.310 | MLB elite ceiling |
+| Jackson Merrill | 0.295 | MLB elite |
+| Aaron Judge | 0.289 | MLB elite ceiling |
+| Francisco Lindor | 0.259 | MLB solid |
+| Kevin McGonigle | 0.226 | thin-sample floor |
+| Munetaka Murakami | 0.225 | thin-sample floor |
+| José Ramírez | 0.206 | MLB solid |
+
+AAA validation hitters (Task 2):
+
+| Hitter | P(hard) |
+|--------|---------|
+| Domínguez, Jasson | 0.310 |
+| Baldwin, Drake | 0.303 |
+| Dingler, Dillon | 0.288 |
+| Narváez, Carlos | 0.270 |
+| Kurtz, Nick | 0.257 |
+
+## AAA Validation Gates (scripts/validate_aaa_profiles.py)
+| Gate | Threshold | Rationale |
+|------|-----------|-----------|
+| Gate 1: ceiling | ≤ 0.320 | Ohtani (0.310) + 0.010 headroom — elite AAA vs D1-level pitching is expected to match MLB elite |
+| Gate 2: floor | ≥ 0.215 | thin-MLB floor − 0.010 |
+| Gate 3: spread | ≥ 0.020 | hitter features must differentiate |
+| ~~Gate 4~~ | removed | raw hard_hit_rate is not a valid ordering proxy for composite P(hard) = P(swing) × P(contact\|swing) × P(hard\|contact) |
 
 ## Status & Next Steps
-**Done:** data pipeline, preprocessing, three-stage XGBoost, calibration, zone/family/contextual hitter features, switch hitter support, 20-player tiered validation, Flask demo on Render (15 curated hitters, demo mode hides Game Log tab).
-**Next:** xwOBA target (Phase 1.5), count-specific hitter rates (hard_contact only), pitcher features re-integration, Phase 2 LSTM/Transformer sequencing.
+**Done:** data pipeline, preprocessing, three-stage XGBoost, calibration, zone/family/contextual hitter features, switch hitter support, 20-player tiered validation, Flask demo on Render (15 curated hitters, demo mode hides Game Log tab), xwOBA regressor (trained, wired into predict_combined), AAA hitter profile pipeline (Task 2), per-league separated report module (Task 3).
+
+**Next:** xwOBA regressor training (Phase 1.5 — model exists, needs training run), count-specific hitter rates (hard_contact only), pitcher features re-integration, Phase 2 LSTM/Transformer sequencing.
