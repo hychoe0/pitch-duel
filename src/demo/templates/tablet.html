@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Pitch Duel — Tablet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
+
+<style>
+/* ── Design tokens ─────────────────────────────────────── */
+:root {
+  --pd-red:        #D92533;
+  --pd-red-deep:   #A8141E;
+  --pd-red-soft:   #FCE9EA;
+  --pd-cream:      #FAF6F1;
+  --pd-bone:       #FFFFFF;
+  --pd-ink:        #15171C;
+  --pd-ink-2:      #3A3F47;
+  --pd-ink-3:      #6B7280;
+  --pd-ink-4:      #9AA0A8;
+  --pd-line:       #E7E2DA;
+  --pd-line-2:     #F0EBE3;
+  --pd-bg:         #F4EFE8;
+  --pd-good:       #1F8A4C;
+  --pd-good-soft:  #E5F4EB;
+  --pd-warn:       #C77700;
+  --pd-warn-soft:  #FBF1DC;
+  --pd-bad:        #C81E2C;
+  --pd-bad-soft:   #FCE7E9;
+  --pd-font-sans:  "Inter", -apple-system, system-ui, sans-serif;
+  --pd-font-display: "Instrument Serif", "Times New Roman", serif;
+  --pd-font-mono:  "JetBrains Mono", ui-monospace, monospace;
+  --pd-r-sm: 8px;
+  --pd-r-md: 14px;
+  --pd-r-lg: 20px;
+  --pd-r-xl: 28px;
+  --pd-shadow-card: 0 1px 2px rgba(20,20,30,0.04), 0 4px 16px rgba(20,20,30,0.04);
+  --pd-shadow-tablet: 0 30px 80px -20px rgba(80,30,30,0.20), 0 8px 24px rgba(80,30,30,0.08);
+}
+
+/* ── Reset / base ──────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  font-family: var(--pd-font-sans);
+  color: var(--pd-ink);
+  background: var(--pd-bg);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+/* ── Tablet shell ──────────────────────────────────────── */
+.pd-tablet {
+  background: var(--pd-cream);
+  color: var(--pd-ink);
+  border-radius: var(--pd-r-xl);
+  box-shadow: var(--pd-shadow-tablet);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 1180px;
+  height: 820px;
+  flex-shrink: 0;
+}
+
+/* ── Typography ────────────────────────────────────────── */
+.pd-display {
+  font-family: var(--pd-font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  color: var(--pd-ink);
+}
+.pd-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--pd-ink-3);
+  font-weight: 600;
+}
+.pd-mono { font-family: var(--pd-font-mono); }
+
+/* ── Cards ─────────────────────────────────────────────── */
+.pd-card {
+  background: var(--pd-bone);
+  border-radius: var(--pd-r-lg);
+  box-shadow: var(--pd-shadow-card);
+  border: 1px solid var(--pd-line);
+}
+
+/* ── Buttons ───────────────────────────────────────────── */
+.pd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 14px 22px;
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+  min-height: 48px;
+  color: inherit;
+}
+.pd-btn:active { transform: scale(0.98); }
+.pd-btn--primary { background: var(--pd-red); color: #fff !important; }
+.pd-btn--primary:hover { background: var(--pd-red-deep); }
+.pd-btn--ghost { background: transparent; color: var(--pd-ink); border: 1.5px solid var(--pd-line); }
+.pd-btn--ghost:hover { background: var(--pd-line-2); }
+
+/* ── Pills ─────────────────────────────────────────────── */
+.pd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--pd-line-2);
+  color: var(--pd-ink-2);
+}
+.pd-pill--good { background: var(--pd-good-soft); color: var(--pd-good); }
+.pd-pill--warn { background: var(--pd-warn-soft); color: var(--pd-warn); }
+.pd-pill--bad  { background: var(--pd-bad-soft);  color: var(--pd-bad);  }
+
+/* ── Range slider ──────────────────────────────────────── */
+input[type="range"] { -webkit-appearance: none; background: transparent; width: 100%; }
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px; background: var(--pd-line); border-radius: 999px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; border-radius: 999px;
+  background: var(--pd-red); border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2); margin-top: -8px; cursor: pointer;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+.pd-scroll::-webkit-scrollbar { width: 4px; }
+.pd-scroll::-webkit-scrollbar-track { background: transparent; }
+.pd-scroll::-webkit-scrollbar-thumb { background: var(--pd-line); border-radius: 999px; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js"
+  integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"
+  crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"
+  integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"
+  crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"
+  integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y"
+  crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 1 — Constants & helpers
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+const { useState, useEffect, useMemo, useRef } = React;
+
+const ACCENT   = "#D92533";
+const RED_DEEP = "#A8141E";
+
+const PITCH_TYPES = [
+  { code: "FF", name: "4-Seam",   color: "#D92533" },
+  { code: "SI", name: "Sinker",   color: "#E07A1F" },
+  { code: "FC", name: "Cutter",   color: "#B45309" },
+  { code: "SL", name: "Slider",   color: "#7C3AED" },
+  { code: "CU", name: "Curve",    color: "#2563EB" },
+  { code: "CH", name: "Change",   color: "#0E9488" },
+  { code: "FS", name: "Splitter", color: "#0891B2" },
+  { code: "SV", name: "Sweeper",  color: "#9333EA" },
+];
+
+// Default hidden pitch parameters (matched to existing index.html PITCH_DEFAULTS)
+const PITCH_DEFAULTS = {
+  FF: { spin: 2300, pfx_x: -0.5, pfx_z:  1.4, rel_x: -1.5, rel_z: 5.9, ext: 6.2 },
+  SI: { spin: 2100, pfx_x: -0.9, pfx_z:  0.9, rel_x: -1.5, rel_z: 5.9, ext: 6.2 },
+  FC: { spin: 2400, pfx_x: -0.1, pfx_z:  1.1, rel_x: -1.5, rel_z: 5.9, ext: 6.2 },
+  SL: { spin: 2500, pfx_x:  0.4, pfx_z:  0.2, rel_x: -1.5, rel_z: 5.9, ext: 6.0 },
+  CU: { spin: 2700, pfx_x:  0.2, pfx_z: -0.8, rel_x: -1.5, rel_z: 5.9, ext: 5.8 },
+  CH: { spin: 1800, pfx_x: -0.6, pfx_z:  0.6, rel_x: -1.5, rel_z: 5.9, ext: 6.0 },
+  FS: { spin: 1600, pfx_x: -0.3, pfx_z:  0.3, rel_x: -1.5, rel_z: 5.9, ext: 6.0 },
+  SV: { spin: 2600, pfx_x:  0.7, pfx_z:  0.1, rel_x: -1.5, rel_z: 5.9, ext: 6.0 },
+};
+
+// Derive initials from "Last, First" or "First Last" formats
+function hitterInitials(name) {
+  if (!name) return "??";
+  // Handle "Last, First" format
+  const commaIdx = name.indexOf(",");
+  if (commaIdx !== -1) {
+    const last  = name.slice(0, commaIdx).trim();
+    const first = name.slice(commaIdx + 1).trim();
+    return ((first[0] || "") + (last[0] || "")).toUpperCase();
+  }
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
+
+// Display name: "Last, First" → "First Last"
+function displayName(name) {
+  if (!name) return name;
+  const commaIdx = name.indexOf(",");
+  if (commaIdx !== -1) {
+    const last  = name.slice(0, commaIdx).trim();
+    const first = name.slice(commaIdx + 1).trim();
+    return first ? `${first} ${last}` : last;
+  }
+  return name;
+}
+
+function ptColor(code) {
+  return (PITCH_TYPES.find(p => p.code === code) || {}).color || ACCENT;
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 2 — StrikeZone (interactive, detailed silhouette)
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+// Detailed batter silhouette paths from the existing desktop app.
+// Native orientation: LHH facing right (bat on right side).
+const BATTER_BODY_PATH = "M52.2197725,259.366042 C48.9064651,260.423253 49.1461277,261.457204 48.9064651,261.480462 C48.9892978,260.4888 49.2554669,258.254914 48.9064651,257.251623 C47.8020293,254.079992 42.2798505,242.450683 44.4887221,223.420903 C45.7444656,212.60353 42.7635934,197.279271 41.9849661,194.614045 C41.8480161,194.172132 41.7762278,193.928973 41.7762278,193.928973 C41.7762278,193.928973 41.8568516,194.173188 41.9849661,194.614045 C43.1435193,198.329081 45.1767855,204.158537 57.7419513,226.592532 C58.1682636,227.352667 69.2534855,243.035319 68.7863091,246.679522 C68.1402142,251.719242 57.5619283,257.661819 52.2197725,259.366042 L52.2197725,259.366042 Z M25.0373991,82.0930712 C22.5303299,83.8046942 19.983501,84.5954873 16.2615524,86.8674315 C14.9682581,85.1642662 13.0167201,74.5615072 15.0080178,71.5262574 C16.9993155,68.4920647 16.605032,69.4657551 18.1424066,67.8281368 C18.9530625,66.9643962 18.8536632,60.9150407 19.3959412,60.8124913 C20.0851091,60.6824544 21.9041148,64.974727 22.5303299,66.6874072 C23.1720072,67.8524526 23.5530374,70.3770701 24.4111841,71.5262574 C26.1020752,73.7929156 25.9485587,72.1722126 29.4253225,72.9640629 C34.4405654,74.1047925 36.8007446,78.295573 36.8007446,78.295573 C34.9706946,78.4488684 30.052642,78.0989318 25.0373991,82.0930712 L25.0373991,82.0930712 Z M49.5757533,267.407181 C49.8618021,267.680999 50.2108038,267.891383 50.6006697,267.992876 C54.1425951,268.914764 60.9934103,269.184352 64.3685661,268.880932 C67.0545538,268.638831 87.5981637,269.358792 90.8750247,265.709302 C93.0595986,263.276662 89.8136618,258.624938 85.8807661,248.486294 C73.2040523,205.448333 75.0186402,204.990561 69.2037859,198.551095 C66.3885791,195.433383 68.1645117,193.620267 67.8961339,191.733147 C67.3339761,187.770724 67.893925,188.671468 69.2037859,187.518051 C71.1387573,185.812772 75.8436537,173.059648 77.1535146,170.018054 C78.4655842,166.977519 83.4653651,159.069588 84.7763303,157.852739 C86.0872956,156.636947 97.1603686,142.132026 80.1200291,125.100374 L78.8112727,125.100374 C78.8112727,123.443726 78.0359587,123.161451 79.5324692,121.610524 C81.0300841,120.058539 72.7666956,97.6382869 73.5088765,78.9140408 C73.5088765,78.9140408 79.6793592,61.8675869 72.0808411,57.8047289 C68.5168268,54.7959092 48.4061557,54.4808607 46.5540169,53.9617705 C47.0653707,51.6306226 46.5540169,49.8164501 46.5540169,46.9640977 C46.5540169,44.1106878 43.8293739,39.9505666 36.5158001,36.695417 C34.0043132,35.4912548 27.2252864,34.6539445 20.852692,38.975819 C18.5830765,40.5151167 17.7183032,42.968901 17.7183032,45.2524746 C15.538147,46.0760412 10.8233107,49.8164501 9.56977608,51.5280732 C4.13705649,53.4511381 1.00266775,55.5433567 0.166609871,57.8047289 C-1.08692474,61.1962585 5.14430191,68.1326133 5.14430191,68.1326133 C5.14430191,68.1326133 -4.03024608,91.2463953 2.52347582,102.194862 C2.52347582,102.194862 8.29525719,102.869362 13.956595,102.194862 C18.9895088,101.597538 26.1959522,98.600348 26.1959522,98.4005353 C26.1959522,97.9755369 29.0299344,113.233191 30.1310569,116.642693 C30.1310569,116.642693 35.6532358,135.672473 40.0709789,135.672473 C43.8625069,135.672473 43.3323778,137.662143 43.3091846,137.613511 C43.3367955,137.647342 43.4450303,137.759406 43.8139117,138.08397 C44.5892257,138.770099 45.5931578,144.141783 45.5931578,145.187364 C45.5931578,145.187364 41.1754147,147.301784 30.8820733,166.652955 C30.8820733,166.652955 19.7040788,185.766254 20.1911349,192.761813 C22.4000065,224.478113 33.4023956,245.195199 32.3399285,247.736733 C30.1310569,253.022783 21.7870447,257.180789 12.4600845,262.537673 C6.93790562,265.709302 18.0949158,268.225462 18.0949158,268.225462 C18.0949158,268.225462 24.3217247,268.528881 28.2535161,267.31309 C31.2089862,266.398603 40.8783214,265.730447 47.5005184,265.709302 C47.697108,265.709302 47.8804443,265.784364 48.0196032,265.917573 L49.5757533,267.407181 Z";
+const BATTER_BAT_PATH = "M21.0526316,46.8451531 C28.0671334,42.211283 46.668798,29.2166921 52.9432478,24.633802 C59.2176975,20.0509119 88.4734639,2.06452882 93.4773624,0.279166555 C98.4823638,-1.50513363 101.341104,5.77651045 99.3735143,7.60754232 L59.4151183,30.8151276 C55.002379,33.2271191 36.2661595,42.936686 24.613925,49.3867187 L21.0526316,46.8451531 Z";
+
+function StrikeZone({ size = 320, plateX = 0, plateZ = 2.5, batter = "R", onPick, accent = ACCENT }) {
+  const W = size, H = size;
+  const SZ_X_MIN = -0.85, SZ_X_MAX = 0.85, SZ_Z_MIN = 1.5, SZ_Z_MAX = 3.5;
+  const CHASE = 0.5;
+
+  const ftToSvg = (px, pz) => ({
+    x: ((px - (-2.0)) / 4.0) * W,
+    y: ((1 - (pz - 0.5) / 4.0)) * H,
+  });
+  const svgToFt = (x, y) => ({
+    px: (x / W) * 4.0 - 2.0,
+    pz: (1 - y / H) * 4.0 + 0.5,
+  });
+
+  const zTL = ftToSvg(SZ_X_MIN, SZ_Z_MAX);
+  const zBR = ftToSvg(SZ_X_MAX, SZ_Z_MIN);
+  const cTL = ftToSvg(SZ_X_MIN - CHASE, SZ_Z_MAX + CHASE);
+  const cBR = ftToSvg(SZ_X_MAX + CHASE, SZ_Z_MIN - CHASE);
+  const marker = ftToSvg(plateX, plateZ);
+
+  const handleTap = (e) => {
+    if (!onPick) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * W;
+    const y = ((e.clientY - rect.top)  / rect.height) * H;
+    const c = svgToFt(x, y);
+    onPick(Math.max(-1.7, Math.min(1.7, c.px)), Math.max(0.7, Math.min(4.3, c.pz)));
+  };
+
+  // Batter silhouette — detailed paths from index.html.
+  // From pitcher's POV: LHH on left (x=small), RHH on right (x=large).
+  // Paths are natively LHH. flip=-1 mirrors for RHH (pitcher sees RHH on their left → right of SVG).
+  const s         = size / 220;
+  const pathScale = 200 / 270;
+  const ts        = pathScale * s;
+  const isLeft    = (batter === "L" || batter === "S");  // switch → treat as L for display
+  const flip      = isLeft ? 1 : -1;
+  const batX      = isLeft ? 26 * s : (W - 26 * s);
+  const batY      = ftToSvg(0, 0.9).y;   // home-plate y — feet anchor
+
+  return (
+    <svg
+      width="100%" viewBox={`0 0 ${W} ${H}`}
+      style={{ background: "var(--pd-line-2)", borderRadius: 16, cursor: onPick ? "crosshair" : "default", touchAction: "none" }}
+      onClick={handleTap}
+    >
+      {/* Subtle stitch tint */}
+      <defs>
+        <pattern id="sz-stitch" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="14" stroke="rgba(217,37,51,0.06)" strokeWidth="3"/>
+        </pattern>
+      </defs>
+      <rect width={W} height={H} fill="url(#sz-stitch)"/>
+
+      {/* Chase border */}
+      <rect x={cTL.x} y={cTL.y} width={cBR.x - cTL.x} height={cBR.y - cTL.y}
+        fill="none" stroke="var(--pd-line)" strokeWidth="1.5" strokeDasharray="6 6" rx="6"/>
+
+      {/* Strike zone */}
+      <rect x={zTL.x} y={zTL.y} width={zBR.x - zTL.x} height={zBR.y - zTL.y}
+        fill="rgba(255,255,255,0.55)" stroke="var(--pd-ink)" strokeWidth="2.5" rx="2"/>
+
+      {/* 3×3 grid */}
+      {[1, 2].map(i => (
+        <g key={i}>
+          <line x1={zTL.x + ((zBR.x - zTL.x) / 3) * i} y1={zTL.y}
+            x2={zTL.x + ((zBR.x - zTL.x) / 3) * i} y2={zBR.y}
+            stroke="var(--pd-ink-4)" strokeOpacity="0.4" strokeWidth="1"/>
+          <line x1={zTL.x} y1={zTL.y + ((zBR.y - zTL.y) / 3) * i}
+            x2={zBR.x} y2={zTL.y + ((zBR.y - zTL.y) / 3) * i}
+            stroke="var(--pd-ink-4)" strokeOpacity="0.4" strokeWidth="1"/>
+        </g>
+      ))}
+
+      {/* Home plate */}
+      {(() => {
+        const hp = ftToSvg(0, 0.9);
+        const hw = (17 / 12) / 4.0 * W;
+        return (
+          <polygon
+            points={`${hp.x},${hp.y+8} ${hp.x-hw/2},${hp.y} ${hp.x-hw/2},${hp.y-8} ${hp.x+hw/2},${hp.y-8} ${hp.x+hw/2},${hp.y}`}
+            fill="rgba(255,255,255,0.9)" stroke="var(--pd-ink-3)" strokeWidth="1.5"
+          />
+        );
+      })()}
+
+      {/* Detailed batter silhouette (sourced from index.html) */}
+      <g transform={`translate(${batX},${batY}) scale(${flip * ts},${ts}) translate(-100,-250)`}
+         opacity="0.35" fillRule="nonzero">
+        <path d={BATTER_BAT_PATH}  fill="#c9d1d9"/>
+        <path d={BATTER_BODY_PATH} fill="#8b949e"/>
+      </g>
+
+      {/* Pitch marker */}
+      <g style={{ transition: "transform 0.18s ease" }} transform={`translate(${marker.x} ${marker.y})`}>
+        <circle r="22" fill={accent} fillOpacity="0.18"/>
+        <circle r="13" fill={accent} stroke="#fff" strokeWidth="3"/>
+        <circle r="3"  fill="#fff"/>
+      </g>
+    </svg>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 3 — Shared components
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function StageBar({ label, value, color }) {
+  const pct = Math.round((value || 0) * 100);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--pd-ink-2)" }}>{label}</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontFamily: "var(--pd-font-mono)", fontSize: 20, fontWeight: 700, color }}>{pct}</span>
+          <span style={{ fontSize: 12, color: "var(--pd-ink-3)" }}>%</span>
+        </div>
+      </div>
+      <div style={{ height: 8, background: "var(--pd-line-2)", borderRadius: 999, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 999, transition: "width .35s ease" }}/>
+      </div>
+    </div>
+  );
+}
+
+function PitchDuelLogo({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32">
+      <circle cx="16" cy="16" r="14" fill="#fff" stroke="var(--pd-ink)" strokeWidth="1.5"/>
+      <path d="M 6 10 Q 16 16 6 22" stroke="var(--pd-red)" strokeWidth="2" fill="none" strokeLinecap="round"/>
+      <path d="M 26 10 Q 16 16 26 22" stroke="var(--pd-red)" strokeWidth="2" fill="none" strokeLinecap="round"/>
+      {[0,1,2,3,4].map(i => (
+        <g key={i}>
+          <line x1={9 - i*0.3} y1={11 + i*2.5} x2={11 - i*0.3} y2={10.5 + i*2.5} stroke="var(--pd-red)" strokeWidth="1.2"/>
+          <line x1={23 + i*0.3} y1={11 + i*2.5} x2={21 + i*0.3} y2={10.5 + i*2.5} stroke="var(--pd-red)" strokeWidth="1.2"/>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function ConnectionStatus({ connected }) {
+  return (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 8,
+      padding: "8px 14px", borderRadius: 999,
+      background: connected ? "var(--pd-good-soft)" : "var(--pd-line-2)",
+      color: connected ? "var(--pd-good)" : "var(--pd-ink-3)",
+      fontSize: 12, fontWeight: 600
+    }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: 999,
+        background: connected ? "var(--pd-good)" : "var(--pd-ink-4)",
+        boxShadow: connected ? "0 0 0 4px rgba(31,138,76,0.18)" : "none"
+      }}/>
+      {connected ? "Trackman · Live" : "No device connected"}
+    </div>
+  );
+}
+
+function HitterCard({ hitter, selected, onSelect }) {
+  const initials = hitterInitials(hitter.name);
+  return (
+    <button onClick={() => onSelect && onSelect(hitter)} style={{
+      textAlign: "left",
+      background: selected ? "var(--pd-ink)" : "var(--pd-bone)",
+      color: selected ? "var(--pd-cream)" : "var(--pd-ink)",
+      border: `1.5px solid ${selected ? "var(--pd-ink)" : "var(--pd-line)"}`,
+      borderRadius: 18, padding: "16px 18px",
+      cursor: "pointer", fontFamily: "inherit",
+      boxShadow: selected ? "0 8px 20px rgba(0,0,0,0.12)" : "var(--pd-shadow-card)",
+      transition: "all .15s ease", width: "100%",
+      display: "flex", alignItems: "center", gap: 12,
+    }}>
+      <div style={{
+        width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+        background: selected ? "var(--pd-red)" : "var(--pd-red-soft)",
+        color: selected ? "#fff" : "var(--pd-red)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontWeight: 700, fontSize: 13, fontFamily: "var(--pd-font-mono)",
+      }}>{initials}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 16, lineHeight: 1.2 }}>{displayName(hitter.name)}</div>
+        <div style={{
+          fontSize: 11, marginTop: 3, fontFamily: "var(--pd-font-mono)",
+          color: selected ? "rgba(255,255,255,0.7)" : "var(--pd-ink-3)",
+        }}>{hitter.stand}HH</div>
+      </div>
+    </button>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 4 — TabletHeader + TabBar
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function TabletHeader({ hitter, onChangeHitter, deviceConnected }) {
+  const initials = hitter ? hitterInitials(hitter.name) : "??";
+  return (
+    <header style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "20px 32px",
+      borderBottom: "1px solid var(--pd-line)",
+      background: "var(--pd-cream)", flexShrink: 0,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <PitchDuelLogo size={32}/>
+        <div>
+          <div style={{ fontFamily: "var(--pd-font-display)", fontSize: 22, lineHeight: 1, color: "var(--pd-ink)" }}>
+            Pitch Duel
+          </div>
+          <div className="pd-eyebrow" style={{ marginTop: 2, fontSize: 9 }}>Hitter Behavior · v2</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {hitter && (
+          <button onClick={onChangeHitter} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "8px 14px 8px 8px", borderRadius: 999,
+            background: "var(--pd-bone)", border: "1.5px solid var(--pd-line)",
+            cursor: "pointer", fontFamily: "inherit",
+          }}>
+            <span style={{
+              width: 30, height: 30, borderRadius: 999, background: ACCENT,
+              color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, fontWeight: 700, fontFamily: "var(--pd-font-mono)"
+            }}>{initials}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--pd-ink)" }}>{displayName(hitter.name)}</span>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M3 5l4 4 4-4" stroke="var(--pd-ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        )}
+        <ConnectionStatus connected={deviceConnected}/>
+      </div>
+    </header>
+  );
+}
+
+function TabBar({ view, onChange }) {
+  const tabs = [
+    { id: "dashboard", label: "Home",     icon: <path d="M3 11l9-8 9 8v10a1 1 0 01-1 1h-5v-7h-6v7H4a1 1 0 01-1-1V11z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" fill="none"/> },
+    { id: "predict",   label: "Predict",  icon: <><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" fill="none"/><circle cx="12" cy="12" r="3" fill="currentColor"/></> },
+    { id: "atbat",     label: "At-Bat",   icon: <><path d="M5 19l9-9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="16" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" fill="none"/><path d="M3 21l3-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></> },
+    { id: "log",       label: "Game Log", icon: <><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" strokeWidth="1.6" fill="none"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></> },
+  ];
+  return (
+    <nav style={{
+      display: "flex", justifyContent: "space-around", alignItems: "center",
+      padding: "10px 16px 18px",
+      borderTop: "1px solid var(--pd-line)",
+      background: "var(--pd-cream)", flexShrink: 0,
+    }}>
+      {tabs.map(t => {
+        const active = view === t.id;
+        return (
+          <button key={t.id} onClick={() => onChange(t.id)} style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+            padding: "8px 18px", border: "none", background: "transparent",
+            color: active ? ACCENT : "var(--pd-ink-3)",
+            cursor: "pointer", fontFamily: "inherit",
+            transition: "color .15s ease", position: "relative",
+          }}>
+            <svg width="24" height="24" viewBox="0 0 24 24">{t.icon}</svg>
+            <span style={{ fontSize: 11, fontWeight: 600 }}>{t.label}</span>
+            {active && <span style={{ position: "absolute", top: -10, width: 28, height: 3, borderRadius: 2, background: ACCENT }}/>}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 5 — DashboardView
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function DashboardView({ hitter, hitterProfile, onChangeHitter, onStartTest, onStartAtBat, deviceConnected, onConnectDevice }) {
+  const pct = v => v != null ? Math.round(v * 100) : "—";
+
+  return (
+    <div className="pd-scroll" style={{ padding: "28px 36px", overflowY: "auto", flex: 1 }}>
+      {/* Hero */}
+      <section style={{ marginBottom: 24 }}>
+        <div className="pd-eyebrow" style={{ color: ACCENT }}>PITCH DUEL · TABLET</div>
+        <h1 className="pd-display" style={{ fontSize: 52, marginTop: 6, marginBottom: 10 }}>
+          Train against the<br/>
+          <span style={{ color: ACCENT }}>best hitters</span> on the planet.
+        </h1>
+        <p style={{ fontSize: 15, color: "var(--pd-ink-2)", maxWidth: 620, lineHeight: 1.6 }}>
+          Pick a hitter, throw a pitch, and Pitch Duel tells you exactly how the at‑bat unfolds — swing, contact,
+          and damage probability — using a model trained on a decade of Statcast data.
+        </p>
+      </section>
+
+      {/* Quick start grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 18, marginBottom: 22 }}>
+        {/* Hitter card */}
+        <div className="pd-card" style={{ padding: 22 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <span className="pd-eyebrow">Today's matchup</span>
+            <button onClick={onChangeHitter} style={{
+              fontSize: 12, fontWeight: 600, color: ACCENT, background: "transparent",
+              border: "none", cursor: "pointer", fontFamily: "inherit",
+            }}>Change ↗</button>
+          </div>
+          {hitter && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 18 }}>
+                <div style={{
+                  width: 64, height: 64, borderRadius: 18, background: ACCENT,
+                  color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: 700, fontSize: 18, fontFamily: "var(--pd-font-mono)"
+                }}>{hitterInitials(hitter.name)}</div>
+                <div>
+                  <div style={{ fontFamily: "var(--pd-font-display)", fontSize: 30, lineHeight: 1.1 }}>{displayName(hitter.name)}</div>
+                  <div style={{ fontSize: 12, color: "var(--pd-ink-3)", marginTop: 4 }}>
+                    {hitter.stand === "S" ? "Switch hitter" : `${hitter.stand}HH`}
+                    {hitterProfile ? ` · ${(hitterProfile.sample_size || 0).toLocaleString()} pitches in profile` : ""}
+                    {hitterProfile?.is_thin_sample ? " · thin sample" : ""}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                {[
+                  { v: hitterProfile ? pct(hitterProfile.swing_rate)    : "…", l: "Swing"    },
+                  { v: hitterProfile ? pct(hitterProfile.contact_rate)  : "…", l: "Contact"  },
+                  { v: hitterProfile ? pct(hitterProfile.hard_hit_rate) : "…", l: "Hard Hit" },
+                  { v: hitterProfile ? pct(hitterProfile.whiff_rate)    : "…", l: "Whiff"    },
+                ].map(s => (
+                  <div key={s.l} style={{ background: "var(--pd-line-2)", borderRadius: 12, padding: "12px 8px", textAlign: "center" }}>
+                    <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 22, fontWeight: 700, color: "var(--pd-ink)" }}>
+                      {s.v}{typeof s.v === "number" ? <span style={{ fontSize: 12, color: "var(--pd-ink-3)" }}>%</span> : ""}
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--pd-ink-3)", marginTop: 2, fontWeight: 600, letterSpacing: "0.04em" }}>
+                      {s.l.toUpperCase()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Device connect */}
+        <div className="pd-card" style={{
+          padding: 22, display: "flex", flexDirection: "column",
+          background: "#fff", border: "1px solid var(--pd-line)",
+        }}>
+          <span className="pd-eyebrow" style={{ color: "rgb(107,114,128)" }}>Pitch tracker</span>
+          {deviceConnected ? (
+            <>
+              <div style={{ marginTop: 10, fontFamily: "var(--pd-font-display)", fontSize: 26, lineHeight: 1.15 }}>
+                Trackman is live<br/>and feeding pitches.
+              </div>
+              <div style={{ marginTop: "auto", paddingTop: 18, display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--pd-ink-3)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: "var(--pd-good)", boxShadow: "0 0 0 4px rgba(31,138,76,0.2)" }}/>
+                Bullpen 3 · 27ms latency
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ marginTop: 10, fontFamily: "var(--pd-font-display)", fontSize: 26, lineHeight: 1.15, color: "#000" }}>
+                Connect your tracker<br/>to throw live.
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: 11, padding: "5px 10px", borderRadius: 999,
+                  fontWeight: 600, color: "#000", background: "rgb(240,235,227)"
+                }}>Trackman</span>
+              </div>
+              <button onClick={onConnectDevice} className="pd-btn pd-btn--primary"
+                style={{ marginTop: 21, alignSelf: "flex-start" }}>
+                Connect device
+                <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 7h8m-3-3l3 3-3 3" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Quick actions */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
+        <button onClick={onStartTest} className="pd-card" style={{
+          padding: 22, textAlign: "left", cursor: "pointer", fontFamily: "inherit",
+          display: "flex", alignItems: "center", gap: 16, border: "1px solid var(--pd-line)",
+          background: "var(--pd-bone)",
+        }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16, flexShrink: 0,
+            background: "var(--pd-red-soft)", color: ACCENT,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width="26" height="26" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" fill="none"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 3, color: "var(--pd-ink)" }}>Test a pitch</div>
+            <div style={{ fontSize: 13, color: "var(--pd-ink-3)" }}>Single-pitch prediction with full pipeline.</div>
+          </div>
+          <svg width="20" height="20" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5" stroke="var(--pd-ink-3)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+        </button>
+        <button onClick={onStartAtBat} className="pd-card" style={{
+          padding: 22, textAlign: "left", cursor: "pointer", fontFamily: "inherit",
+          display: "flex", alignItems: "center", gap: 16, border: "1px solid var(--pd-line)",
+          background: "var(--pd-bone)",
+        }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16, flexShrink: 0,
+            background: "var(--pd-line-2)", color: "var(--pd-ink)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width="26" height="26" viewBox="0 0 24 24"><path d="M5 19l9-9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/><circle cx="16" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" fill="none"/><path d="M3 21l3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 3, color: "var(--pd-ink)" }}>Build an at‑bat</div>
+            <div style={{ fontSize: 13, color: "var(--pd-ink-3)" }}>Sequence pitches with rolling counts.</div>
+          </div>
+          <svg width="20" height="20" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5" stroke="var(--pd-ink-3)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+        </button>
+      </div>
+
+      {/* How it works */}
+      <section className="pd-card" style={{ padding: 22 }}>
+        <span className="pd-eyebrow">How it works</span>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 14 }}>
+          {[
+            { n: "01", t: "Pick a hitter",        d: "We load 50+ behavioral rates — swing, chase, whiff by zone and pitch family." },
+            { n: "02", t: "Throw or input a pitch", d: "Tracker feeds velocity, spin, location automatically. Or enter manually." },
+            { n: "03", t: "Read the verdict",       d: "P(swing) → P(contact) → P(hard) plus an expected damage estimate." },
+          ].map(s => (
+            <div key={s.n}>
+              <div style={{ fontFamily: "var(--pd-font-mono)", color: ACCENT, fontWeight: 700, fontSize: 13 }}>{s.n}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, marginTop: 6, marginBottom: 4 }}>{s.t}</div>
+              <div style={{ fontSize: 13, color: "var(--pd-ink-3)", lineHeight: 1.5 }}>{s.d}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 6 — PredictView (wired to /api/predict_demo)
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function PredictView({ hitter, hitterProfile, deviceConnected }) {
+  const [pitchType, setPitchType] = useState("FF");
+  const [velo,      setVelo]      = useState(94);
+  const [plateX,    setPlateX]    = useState(0);
+  const [plateZ,    setPlateZ]    = useState(2.5);
+  const [balls,     setBalls]     = useState(0);
+  const [strikes,   setStrikes]   = useState(0);
+  const [loading,   setLoading]   = useState(false);
+  const [result,    setResult]    = useState(null);
+  const [error,     setError]     = useState(null);
+
+  const batter = hitter?.stand || "R";
+
+  const runPrediction = async () => {
+    if (!hitter) return;
+    setLoading(true);
+    setError(null);
+    const d = PITCH_DEFAULTS[pitchType] || PITCH_DEFAULTS.FF;
+    try {
+      const res = await fetch("/api/predict_demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hitter_name: hitter.name,
+          pitch: {
+            release_speed:     velo,
+            plate_x:           plateX,
+            plate_z:           plateZ,
+            pitch_type:        pitchType,
+            balls,
+            strikes,
+            spin_rate:         d.spin,
+            pfx_x:             d.pfx_x,
+            pfx_z:             d.pfx_z,
+            release_pos_x:     d.rel_x,
+            release_pos_z:     d.rel_z,
+            release_extension: d.ext,
+            p_throws:          "R",
+            pitch_number:      1,
+            on_1b: 0, on_2b: 0, on_3b: 0,
+            inning: 1, score_diff: 0, times_through_order: 1,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      setResult(await res.json());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const blend   = result?.blend   || {};
+  const verdict = result?.verdict || {};
+  const xwoba   = result?.xwoba   || {};
+  const drivers = (result?.model?.stage_drivers || []).slice(0, 5);
+  const danger  = verdict.danger_level || "";
+  const dangerColor = danger === "HIGH" ? "var(--pd-bad)" : danger === "MODERATE" ? "var(--pd-warn)" : "var(--pd-good)";
+  const dangerBg    = danger === "HIGH" ? "var(--pd-bad-soft)" : danger === "MODERATE" ? "var(--pd-warn-soft)" : "var(--pd-good-soft)";
+
+  const stepperBtn = {
+    width: 32, height: 22, borderRadius: 6, border: "none",
+    background: "var(--pd-bone)", color: "var(--pd-ink-2)",
+    fontSize: 14, fontWeight: 600, cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontFamily: "inherit",
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      {/* LEFT — inputs */}
+      <div className="pd-scroll" style={{
+        flex: "0 0 52%", padding: "24px 28px", overflowY: "auto",
+        borderRight: "1px solid var(--pd-line)",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+          <div>
+            <span className="pd-eyebrow">Step 1</span>
+            <h2 className="pd-display" style={{ fontSize: 28, marginTop: 4 }}>Set the pitch</h2>
+          </div>
+          {deviceConnected && <span className="pd-pill pd-pill--good">⚡ Auto-fed from Trackman</span>}
+        </div>
+
+        {/* Pitch type pills */}
+        <div style={{ marginBottom: 18 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 8 }}>Pitch type</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {PITCH_TYPES.map(p => {
+              const active = pitchType === p.code;
+              return (
+                <button key={p.code} onClick={() => setPitchType(p.code)} style={{
+                  padding: "10px 16px", borderRadius: 999,
+                  border: `1.5px solid ${active ? p.color : "var(--pd-line)"}`,
+                  background: active ? p.color : "var(--pd-bone)",
+                  color: active ? "#fff" : "var(--pd-ink-2)",
+                  fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  <span style={{ fontFamily: "var(--pd-font-mono)", fontSize: 11, opacity: 0.7 }}>{p.code}</span>
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Velocity */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <span className="pd-eyebrow">Velocity</span>
+            <span style={{ fontFamily: "var(--pd-font-mono)", fontSize: 26, fontWeight: 700, color: "var(--pd-ink)" }}>
+              {velo}<span style={{ fontSize: 13, color: "var(--pd-ink-3)", fontWeight: 400 }}> mph</span>
+            </span>
+          </div>
+          <input type="range" min={70} max={104} step={0.5} value={velo}
+            onChange={e => setVelo(parseFloat(e.target.value))}
+            style={{ accentColor: ACCENT }}/>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--pd-ink-4)", fontFamily: "var(--pd-font-mono)" }}>
+            <span>70</span><span>104</span>
+          </div>
+        </div>
+
+        {/* Count */}
+        <div style={{ marginBottom: 20 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 8 }}>Count</div>
+          <div style={{ display: "flex", gap: 12 }}>
+            {[
+              { label: "Balls",   val: balls,   set: setBalls,   max: 3 },
+              { label: "Strikes", val: strikes, set: setStrikes, max: 2 },
+            ].map(s => (
+              <div key={s.label} style={{
+                flex: 1, background: "var(--pd-line-2)", borderRadius: 14, padding: 12,
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--pd-ink-3)", fontWeight: 600, letterSpacing: "0.04em" }}>{s.label.toUpperCase()}</div>
+                  <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 28, fontWeight: 700, lineHeight: 1, color: "var(--pd-ink)" }}>{s.val}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <button onClick={() => s.set(Math.min(s.max, s.val + 1))} style={stepperBtn}>+</button>
+                  <button onClick={() => s.set(Math.max(0, s.val - 1))} style={stepperBtn}>−</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Strike zone picker */}
+        <div className="pd-eyebrow" style={{ marginBottom: 8 }}>
+          Tap to set location <span style={{ color: "var(--pd-ink-4)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· pitcher's view</span>
+        </div>
+        <div style={{ maxWidth: 320 }}>
+          <StrikeZone size={300} plateX={plateX} plateZ={plateZ}
+            batter={batter} accent={ACCENT}
+            onPick={(x, z) => { setPlateX(x); setPlateZ(z); }}/>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontFamily: "var(--pd-font-mono)", fontSize: 11, color: "var(--pd-ink-3)" }}>
+            <span>plate_x  {plateX.toFixed(2)} ft</span>
+            <span>plate_z  {plateZ.toFixed(2)} ft</span>
+          </div>
+        </div>
+
+        <button className="pd-btn pd-btn--primary" onClick={runPrediction} disabled={loading}
+          style={{ marginTop: 18, width: "100%", fontSize: 16, padding: "16px 22px", opacity: loading ? 0.7 : 1 }}>
+          {loading ? "Running…" : "Run prediction"}
+          {!loading && <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h10m-4-4l4 4-4 4" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>}
+        </button>
+      </div>
+
+      {/* RIGHT — results */}
+      <div className="pd-scroll" style={{ flex: 1, padding: "24px 28px", overflowY: "auto", background: "var(--pd-cream)" }}>
+        <span className="pd-eyebrow">Step 2</span>
+        <h2 className="pd-display" style={{ fontSize: 28, marginTop: 4, marginBottom: 18 }}>The verdict</h2>
+
+        {error && (
+          <div style={{ border: "1.5px solid var(--pd-bad-soft)", borderRadius: 14, padding: "16px 20px", color: "var(--pd-bad)", fontSize: 14, marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
+
+        {!result && !error ? (
+          <div style={{
+            border: "2px dashed var(--pd-line)", borderRadius: 18, padding: "44px 24px", textAlign: "center",
+            color: "var(--pd-ink-3)", fontSize: 14,
+          }}>
+            <div style={{ fontFamily: "var(--pd-font-display)", fontSize: 22, color: "var(--pd-ink-2)", marginBottom: 6 }}>
+              Throw a pitch
+            </div>
+            Tap <em>Run prediction</em> to see how {displayName(hitter?.name) || "the hitter"} reacts.
+          </div>
+        ) : result ? (
+          <>
+            {/* Verdict badge */}
+            <div className="pd-card" style={{ padding: 22, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <span className="pd-eyebrow">Expected damage (per-pitch)</span>
+                {danger && (
+                  <span style={{
+                    padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
+                    background: dangerBg, color: dangerColor,
+                  }}>{danger} DANGER</span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+                <span style={{ fontFamily: "var(--pd-font-display)", fontSize: 64, lineHeight: 1, color: dangerColor || "var(--pd-ink)" }}>
+                  {xwoba.predicted_xwoba_per_pitch != null ? Number(xwoba.predicted_xwoba_per_pitch).toFixed(3) : "—"}
+                </span>
+                <span style={{ fontSize: 13, color: "var(--pd-ink-3)" }}>
+                  vs league avg per pitch <span style={{ fontFamily: "var(--pd-font-mono)", color: "var(--pd-ink-2)" }}>0.075</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Stage bars */}
+            <div className="pd-card" style={{ padding: 22, marginBottom: 16 }}>
+              <span className="pd-eyebrow" style={{ marginBottom: 14, display: "block" }}>Three-stage pipeline</span>
+              <StageBar label="P (Swing)"           value={blend.p_swing}   color="#2563EB"/>
+              <StageBar label="P (Contact | Swing)" value={blend.p_contact} color={ACCENT}/>
+              <StageBar label="P (Hard | Contact)"  value={blend.p_hard}    color="var(--pd-warn)"/>
+            </div>
+
+            {/* Feature drivers */}
+            {drivers.length > 0 && (
+              <div className="pd-card" style={{ padding: 22 }}>
+                <span className="pd-eyebrow" style={{ marginBottom: 12, display: "block" }}>Top drivers</span>
+                {drivers.map((d, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 160, fontSize: 13, color: "var(--pd-ink-2)" }}>{d.feature || d.name}</div>
+                    <div style={{ flex: 1, height: 6, background: "var(--pd-line-2)", borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(100, (d.importance || d.value || 0) * 400)}%`, height: "100%", background: "var(--pd-ink-2)" }}/>
+                    </div>
+                    <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 11, color: "var(--pd-ink-3)", width: 38, textAlign: "right" }}>
+                      {((d.importance || d.value || 0) * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 7 — AtBatView (rolling /api/predict_demo per pitch)
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function AtBatView({ hitter }) {
+  const [pitches,  setPitches]  = useState([]);   // { type, velo, x, z, result, pSwing, pContact, pHard, xwoba }
+  const [adding,   setAdding]   = useState(false);
+  const [newType,  setNewType]  = useState("FF");
+  const [newVelo,  setNewVelo]  = useState(94);
+  const [newX,     setNewX]     = useState(0);
+  const [newZ,     setNewZ]     = useState(2.5);
+  const [error,    setError]    = useState(null);
+
+  const batter = hitter?.stand || "R";
+
+  // Rolling count from pitch outcomes so far
+  const { balls, strikes } = useMemo(() => {
+    let b = 0, s = 0;
+    for (const p of pitches) {
+      if (p.result === "ball") b = Math.min(3, b + 1);
+      else if (p.result === "called_strike" || p.result === "swinging_strike") s = Math.min(2, s + 1);
+    }
+    return { balls: b, strikes: s };
+  }, [pitches]);
+
+  const addPitch = async () => {
+    if (!hitter) return;
+    setAdding(true);
+    setError(null);
+    const d = PITCH_DEFAULTS[newType] || PITCH_DEFAULTS.FF;
+    try {
+      const res = await fetch("/api/predict_demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hitter_name: hitter.name,
+          pitch: {
+            release_speed:     newVelo,
+            plate_x:           newX,
+            plate_z:           newZ,
+            pitch_type:        newType,
+            balls,
+            strikes,
+            spin_rate:         d.spin,
+            pfx_x:             d.pfx_x,
+            pfx_z:             d.pfx_z,
+            release_pos_x:     d.rel_x,
+            release_pos_z:     d.rel_z,
+            release_extension: d.ext,
+            p_throws:          "R",
+            pitch_number:      pitches.length + 1,
+            on_1b: 0, on_2b: 0, on_3b: 0,
+            inning: 1, score_diff: 0, times_through_order: 1,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      const bl = data.blend || {};
+      // Determine result from prediction
+      const result = bl.p_swing > 0.65 ? "swinging_strike" : bl.p_swing < 0.35 ? "ball" : "called_strike";
+      setPitches(prev => [...prev, {
+        type: newType, velo: newVelo, x: newX, z: newZ,
+        result,
+        pSwing:   bl.p_swing   || 0,
+        pContact: bl.p_contact || 0,
+        pHard:    bl.p_hard    || 0,
+        xwoba:    data.xwoba?.predicted_xwoba_per_pitch || 0,
+      }]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const avgSwing = pitches.length ? pitches.reduce((a, p) => a + p.pSwing, 0) / pitches.length : 0;
+  const cumXwoba = pitches.length ? (pitches.reduce((a, p) => a + (p.xwoba || 0), 0) / pitches.length).toFixed(3) : "—";
+
+  // Zone SVG (static, shows sequence)
+  const zoneSvg = useMemo(() => {
+    const sz = 260;
+    const ftToS = (px, pz) => ({ x: ((px + 2.0) / 4.0) * sz, y: ((1 - (pz - 0.5) / 4.0)) * sz });
+    const zTL = ftToS(-0.85, 3.5), zBR = ftToS(0.85, 1.5);
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}" style="background:#F0EBE3;border-radius:16px;">`;
+    s += `<rect x="${zTL.x}" y="${zTL.y}" width="${zBR.x-zTL.x}" height="${zBR.y-zTL.y}" fill="rgba(255,255,255,0.6)" stroke="#15171C" stroke-width="2.5"/>`;
+    for (let i = 1; i < 3; i++) {
+      s += `<line x1="${zTL.x+(zBR.x-zTL.x)/3*i}" y1="${zTL.y}" x2="${zTL.x+(zBR.x-zTL.x)/3*i}" y2="${zBR.y}" stroke="#9AA0A8" stroke-opacity="0.4" stroke-width="1"/>`;
+      s += `<line x1="${zTL.x}" y1="${zTL.y+(zBR.y-zTL.y)/3*i}" x2="${zBR.x}" y2="${zTL.y+(zBR.y-zTL.y)/3*i}" stroke="#9AA0A8" stroke-opacity="0.4" stroke-width="1"/>`;
+    }
+    pitches.forEach((p, i) => {
+      const pos = ftToS(p.x, p.z);
+      const col = ptColor(p.type);
+      s += `<circle cx="${pos.x}" cy="${pos.y}" r="14" fill="${col}" stroke="#fff" stroke-width="2"/>`;
+      s += `<text x="${pos.x}" y="${pos.y+4}" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" font-family="monospace">${i+1}</text>`;
+    });
+    s += "</svg>";
+    return s;
+  }, [pitches]);
+
+  const stepBtn = {
+    padding: "6px 12px", borderRadius: 999, border: "none",
+    background: "var(--pd-bone)", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+    color: "var(--pd-ink-2)", border: "1px solid var(--pd-line)",
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      {/* LEFT — sequence */}
+      <div className="pd-scroll" style={{
+        flex: "0 0 58%", padding: "24px 28px", overflowY: "auto",
+        borderRight: "1px solid var(--pd-line)",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <span className="pd-eyebrow">Sequence</span>
+            <h2 className="pd-display" style={{ fontSize: 28, marginTop: 4 }}>The at‑bat</h2>
+          </div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "10px 18px", borderRadius: 14, background: "var(--pd-ink)", color: "var(--pd-cream)",
+          }}>
+            <span style={{ fontSize: 10, letterSpacing: "0.1em", opacity: 0.6 }}>COUNT</span>
+            <span style={{ fontFamily: "var(--pd-font-mono)", fontSize: 22, fontWeight: 700 }}>{balls}–{strikes}</span>
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ color: "var(--pd-bad)", fontSize: 13, marginBottom: 12, padding: "10px 14px", background: "var(--pd-bad-soft)", borderRadius: 10 }}>{error}</div>
+        )}
+
+        {pitches.length === 0 && (
+          <div style={{ textAlign: "center", padding: "28px 0", color: "var(--pd-ink-3)", fontSize: 13 }}>
+            No pitches yet. Add one below.
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+          {pitches.map((p, i) => {
+            const col = ptColor(p.type);
+            return (
+              <div key={i} className="pd-card" style={{ padding: 14, display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{
+                  width: 34, height: 34, borderRadius: 999, background: col,
+                  color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: 700, fontSize: 13, fontFamily: "var(--pd-font-mono)", flexShrink: 0,
+                }}>{i+1}</div>
+                <div style={{ width: 60 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{p.type}</div>
+                  <div style={{ fontSize: 11, color: "var(--pd-ink-3)", fontFamily: "var(--pd-font-mono)" }}>{p.velo} mph</div>
+                </div>
+                <div style={{ flex: 1, display: "flex", gap: 14 }}>
+                  {[
+                    { l: "SW",   v: p.pSwing,   c: "#2563EB" },
+                    { l: "CT",   v: p.pContact, c: ACCENT    },
+                    { l: "HARD", v: p.pHard,    c: "var(--pd-warn)" },
+                  ].map(s => (
+                    <div key={s.l} style={{ flex: 1 }}>
+                      <div style={{ fontSize: 9, color: "var(--pd-ink-3)", fontWeight: 600, letterSpacing: "0.06em" }}>{s.l}</div>
+                      <div style={{ height: 4, background: "var(--pd-line-2)", borderRadius: 999, marginTop: 4 }}>
+                        <div style={{ width: `${Math.round(s.v*100)}%`, height: "100%", background: s.c, borderRadius: 999 }}/>
+                      </div>
+                      <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 10, color: s.c, marginTop: 3, fontWeight: 700 }}>{Math.round(s.v*100)}%</div>
+                    </div>
+                  ))}
+                </div>
+                <span className="pd-pill" style={{ fontSize: 10 }}>{p.result.replace(/_/g, " ")}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Add pitch controls */}
+        <div className="pd-card" style={{ padding: 16 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 10 }}>Add next pitch</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {PITCH_TYPES.slice(0, 6).map(p => {
+              const active = newType === p.code;
+              return (
+                <button key={p.code} onClick={() => setNewType(p.code)} style={{
+                  padding: "7px 13px", borderRadius: 999,
+                  border: `1.5px solid ${active ? p.color : "var(--pd-line)"}`,
+                  background: active ? p.color : "var(--pd-bone)",
+                  color: active ? "#fff" : "var(--pd-ink-2)",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                }}>{p.code}</button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: "var(--pd-ink-3)", width: 54 }}>Velo</span>
+            <input type="range" min={70} max={104} value={newVelo} onChange={e => setNewVelo(+e.target.value)}
+              style={{ flex: 1, accentColor: ACCENT }}/>
+            <span style={{ fontFamily: "var(--pd-font-mono)", fontSize: 13, width: 52, textAlign: "right", color: "var(--pd-ink)" }}>{newVelo} mph</span>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "var(--pd-ink-3)", marginBottom: 6 }}>Location (tap to set)</div>
+            <StrikeZone size={220} plateX={newX} plateZ={newZ} batter={batter} accent={ACCENT}
+              onPick={(x, z) => { setNewX(x); setNewZ(z); }}/>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={addPitch} disabled={adding || !hitter} className="pd-btn pd-btn--primary"
+              style={{ flex: 1, fontSize: 14, padding: "12px 16px", opacity: (adding || !hitter) ? 0.7 : 1 }}>
+              {adding ? "Predicting…" : "+ Add pitch"}
+            </button>
+            {pitches.length > 0 && (
+              <button onClick={() => { setPitches([]); setError(null); }} style={stepBtn}>Reset</button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* RIGHT — zone + summary */}
+      <div className="pd-scroll" style={{ flex: 1, padding: "24px 28px", overflowY: "auto", background: "var(--pd-cream)" }}>
+        <span className="pd-eyebrow">Location</span>
+        <h2 className="pd-display" style={{ fontSize: 22, marginTop: 4, marginBottom: 14 }}>Sequence on the zone</h2>
+        <div dangerouslySetInnerHTML={{ __html: zoneSvg }}/>
+        <div style={{ marginTop: 16 }} className="pd-card">
+          <div style={{ padding: 18 }}>
+            <span className="pd-eyebrow">At-bat summary</span>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 12 }}>
+              {[
+                { l: "Pitches",       v: pitches.length || "—" },
+                { l: "Avg P(swing)",  v: pitches.length ? Math.round(avgSwing * 100) + "%" : "—" },
+                { l: "Avg xwOBA",    v: cumXwoba },
+              ].map(s => (
+                <div key={s.l}>
+                  <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 22, fontWeight: 700, color: "var(--pd-ink)" }}>{s.v}</div>
+                  <div style={{ fontSize: 10, color: "var(--pd-ink-3)", letterSpacing: "0.04em" }}>{s.l.toUpperCase()}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 8 — GameLogView (wired to /game_log)
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function GameLogView({ hitter }) {
+  const [logData,  setLogData]  = useState(null);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(null);
+  const fileRef = useRef(null);
+
+  const upload = async (file) => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    setLogData(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    if (hitter) fd.append("hitter_name", hitter.name);
+    try {
+      const res = await fetch("/game_log", { method: "POST", body: fd });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt.slice(0, 200));
+      }
+      setLogData(await res.json());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const summary       = logData?.summary || {};
+  const ptBreakdown   = logData?.pitch_type_breakdown || [];
+
+  return (
+    <div className="pd-scroll" style={{ padding: "26px 32px", overflowY: "auto", flex: 1 }}>
+      <span className="pd-eyebrow">Bulk evaluation</span>
+      <h2 className="pd-display" style={{ fontSize: 32, marginTop: 4, marginBottom: 6 }}>Hitter game log</h2>
+      <p style={{ fontSize: 14, color: "var(--pd-ink-3)", marginBottom: 20, maxWidth: 640 }}>
+        Upload a Baseball Savant or Trackman CSV of all pitches thrown to a hitter. The model runs the full
+        pipeline on every pitch and surfaces patterns across the session.
+      </p>
+
+      {!logData && !loading ? (
+        <div style={{
+          border: "2px dashed var(--pd-line)", borderRadius: 20, padding: "44px 24px",
+          textAlign: "center", background: "var(--pd-bone)",
+        }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16, background: "var(--pd-red-soft)", color: ACCENT,
+            display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12,
+          }}>
+            <svg width="26" height="26" viewBox="0 0 24 24">
+              <path d="M12 16V4m0 0l-4 4m4-4l4 4M5 20h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            </svg>
+          </div>
+          <div style={{ fontFamily: "var(--pd-font-display)", fontSize: 22, marginBottom: 6 }}>Drop a CSV here</div>
+          <div style={{ fontSize: 13, color: "var(--pd-ink-3)", marginBottom: 16 }}>
+            Trackman or Baseball Savant export · up to 5,000 pitches
+          </div>
+          {error && <div style={{ color: "var(--pd-bad)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+          <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }}
+            onChange={e => upload(e.target.files[0])}/>
+          <button onClick={() => fileRef.current?.click()} className="pd-btn pd-btn--primary">Choose file</button>
+        </div>
+      ) : loading ? (
+        <div style={{ textAlign: "center", padding: "40px", color: "var(--pd-ink-3)", fontSize: 14 }}>
+          <div style={{ fontFamily: "var(--pd-font-display)", fontSize: 22, marginBottom: 8 }}>Analyzing…</div>
+          Running full pipeline on every pitch. This may take a moment.
+        </div>
+      ) : logData ? (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+            {[
+              { l: "Pitches",           v: summary.n_pitches   ?? "—" },
+              { l: "Plate appearances", v: summary.n_pas       ?? "—" },
+              { l: "Avg P(hard)",       v: summary.mean_p_hard != null ? (summary.mean_p_hard * 100).toFixed(1) + "%" : "—", c: ACCENT },
+              { l: "Hitter",            v: displayName(summary.hitter || hitter?.name || "—") },
+            ].map(s => (
+              <div key={s.l} className="pd-card" style={{ padding: 16 }}>
+                <div style={{ fontSize: 11, color: "var(--pd-ink-3)", letterSpacing: "0.04em", fontWeight: 600 }}>{s.l.toUpperCase()}</div>
+                <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 22, fontWeight: 700, marginTop: 4, color: s.c || "var(--pd-ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.v}</div>
+              </div>
+            ))}
+          </div>
+
+          {ptBreakdown.length > 0 && (
+            <div className="pd-card" style={{ padding: 18, marginBottom: 16 }}>
+              <span className="pd-eyebrow">Outcomes by pitch type</span>
+              <div style={{ marginTop: 12 }}>
+                {ptBreakdown.map(r => {
+                  const col = ptColor(r.pitch_type);
+                  return (
+                    <div key={r.pitch_type} style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "10px 0", borderBottom: "1px solid var(--pd-line)",
+                    }}>
+                      <span style={{
+                        width: 40, padding: "4px 0", borderRadius: 8, background: col, color: "#fff",
+                        textAlign: "center", fontFamily: "var(--pd-font-mono)", fontSize: 12, fontWeight: 700,
+                      }}>{r.pitch_type}</span>
+                      <span style={{ width: 68, fontSize: 12, color: "var(--pd-ink-3)" }}>n = {r.count}</span>
+                      <div style={{ flex: 1, display: "flex", gap: 8 }}>
+                        {[
+                          { v: r.mean_p_swing   || 0, c: "#2563EB" },
+                          { v: r.mean_p_contact || 0, c: ACCENT    },
+                          { v: r.mean_p_hard    || 0, c: "var(--pd-warn)" },
+                        ].map((s, i) => (
+                          <div key={i} style={{ flex: 1, height: 18, background: "var(--pd-line-2)", borderRadius: 4, position: "relative", overflow: "hidden" }}>
+                            <div style={{ width: `${(s.v * 100).toFixed(0)}%`, height: "100%", background: s.c }}/>
+                            <span style={{ position: "absolute", top: 0, left: 6, fontSize: 10, fontFamily: "var(--pd-font-mono)", color: "#fff", lineHeight: "18px", fontWeight: 700, mixBlendMode: "difference" }}>
+                              {Math.round(s.v * 100)}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 11, color: "var(--pd-ink-3)" }}>
+                {[{ c: "#2563EB", l: "P(swing)" }, { c: ACCENT, l: "P(contact)" }, { c: "var(--pd-warn)", l: "P(hard)" }].map(x => (
+                  <span key={x.l} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: x.c, display: "inline-block" }}/>
+                    {x.l}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {error && <div style={{ color: "var(--pd-bad)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+          <button onClick={() => { setLogData(null); setError(null); }} className="pd-btn pd-btn--ghost">
+            Upload different CSV
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 9 — HitterPicker overlay
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function HitterPicker({ open, hitters, onClose, onPick }) {
+  const [query, setQuery] = useState("");
+  if (!open) return null;
+  const filtered = hitters.filter(h => displayName(h.name).toLowerCase().includes(query.toLowerCase()));
+  return (
+    <div onClick={onClose} style={{
+      position: "absolute", inset: 0, background: "rgba(20,15,15,0.5)", backdropFilter: "blur(8px)",
+      zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--pd-cream)", borderRadius: 22, padding: 24, width: "min(680px, 100%)",
+        maxHeight: "calc(100% - 48px)", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,0.3)",
+        display: "flex", flexDirection: "column",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <span className="pd-eyebrow">Choose your opponent</span>
+            <h2 className="pd-display" style={{ fontSize: 26, marginTop: 4 }}>Hitters</h2>
+          </div>
+          <button onClick={onClose} style={{
+            width: 36, height: 36, borderRadius: 999, border: "none", background: "var(--pd-line-2)",
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8" stroke="var(--pd-ink-2)" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+        <input
+          type="text" placeholder="Search hitters…" value={query} onChange={e => setQuery(e.target.value)}
+          style={{
+            marginBottom: 14, padding: "10px 14px", borderRadius: 10,
+            border: "1.5px solid var(--pd-line)", background: "var(--pd-bone)",
+            fontFamily: "inherit", fontSize: 14, color: "var(--pd-ink)", outline: "none",
+          }}
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, overflowY: "auto" }}>
+          {filtered.map(h => (
+            <HitterCard key={h.name} hitter={h} onSelect={hh => { onPick(hh); onClose(); }}/>
+          ))}
+        </div>
+        {filtered.length === 0 && (
+          <div style={{ textAlign: "center", padding: 24, color: "var(--pd-ink-3)", fontSize: 14 }}>No hitters found.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+     Block 10 — TabletApp root + bootstrap
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+function TabletApp({ hitters }) {
+  const [view,            setView]   = useState("dashboard");
+  const [hitter,          setHitter] = useState(hitters[0] || null);
+  const [hitterProfile,   setHP]     = useState(null);
+  const [pickerOpen,      setPicker] = useState(false);
+  const [deviceConnected, setDev]    = useState(false);
+
+  // Load profile whenever hitter changes
+  useEffect(() => {
+    if (!hitter) { setHP(null); return; }
+    setHP(null);
+    fetch(`/api/hitter_profile?name=${encodeURIComponent(hitter.name)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setHP(d))
+      .catch(() => {});
+  }, [hitter?.name]);
+
+  const changeHitter = (h) => { setHitter(h); };
+
+  return (
+    <div className="pd-tablet" style={{ "--pd-red": ACCENT, "--pd-red-deep": RED_DEEP }}>
+      <TabletHeader
+        hitter={hitter}
+        hitterProfile={hitterProfile}
+        onChangeHitter={() => setPicker(true)}
+        deviceConnected={deviceConnected}
+      />
+
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--pd-cream)" }}>
+        {view === "dashboard" && (
+          <DashboardView
+            hitter={hitter} hitterProfile={hitterProfile}
+            onChangeHitter={() => setPicker(true)}
+            onStartTest={() => setView("predict")}
+            onStartAtBat={() => setView("atbat")}
+            deviceConnected={deviceConnected}
+            onConnectDevice={() => setDev(true)}
+          />
+        )}
+        {view === "predict" && (
+          <PredictView hitter={hitter} hitterProfile={hitterProfile} deviceConnected={deviceConnected}/>
+        )}
+        {view === "atbat" && (
+          <AtBatView hitter={hitter}/>
+        )}
+        {view === "log" && (
+          <GameLogView hitter={hitter}/>
+        )}
+      </main>
+
+      <TabBar view={view} onChange={setView}/>
+      <HitterPicker
+        open={pickerOpen}
+        hitters={hitters}
+        onClose={() => setPicker(false)}
+        onPick={changeHitter}
+      />
+    </div>
+  );
+}
+
+// Bootstrap: fetch hitter list, then mount
+(async () => {
+  try {
+    const res     = await fetch("/hitters");
+    const { hitters } = await res.json();
+    ReactDOM.createRoot(document.getElementById("root")).render(
+      <TabletApp hitters={hitters}/>
+    );
+  } catch (e) {
+    document.getElementById("root").innerHTML =
+      `<div style="padding:40px;color:#c81e2c;font-family:sans-serif;">Failed to load hitters: ${e.message}</div>`;
+  }
+})();
+{% endraw %}
+</script>
+</body>
+</html>

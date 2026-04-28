@@ -190,6 +190,11 @@ def index():
     return render_template("index.html", demo_mode=DEMO_MODE)
 
 
+@app.route("/tablet")
+def tablet():
+    return render_template("tablet.html")
+
+
 @app.route("/hitters", methods=["GET"])
 def hitters():
     data = load_hitters()
