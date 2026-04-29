@@ -757,10 +757,15 @@ function PredictView({ hitter, hitterProfile, deviceConnected }) {
   const blend   = result?.blend   || {};
   const verdict = result?.verdict || {};
   const xwoba   = result?.xwoba   || {};
-  const drivers = (result?.model?.stage_drivers || []).slice(0, 5);
+  const stageDriversObj = result?.model?.stage_drivers || {};
+  const drivers = Object.entries(stageDriversObj)
+    .flatMap(([stage, arr]) => (arr || []).map(d => ({ ...d, stage })))
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, 5);
   const danger  = verdict.danger_level || "";
-  const dangerColor = danger === "HIGH" ? "var(--pd-bad)" : danger === "MODERATE" ? "var(--pd-warn)" : "var(--pd-good)";
-  const dangerBg    = danger === "HIGH" ? "var(--pd-bad-soft)" : danger === "MODERATE" ? "var(--pd-warn-soft)" : "var(--pd-good-soft)";
+  const dangerLevel = danger.replace(" DANGER", "");
+  const dangerColor = dangerLevel === "HIGH" ? "var(--pd-bad)" : dangerLevel === "MODERATE" ? "var(--pd-warn)" : "var(--pd-good)";
+  const dangerBg    = dangerLevel === "HIGH" ? "var(--pd-bad-soft)" : dangerLevel === "MODERATE" ? "var(--pd-warn-soft)" : "var(--pd-good-soft)";
 
   const stepperBtn = {
     width: 32, height: 22, borderRadius: 6, border: "none",
@@ -902,7 +907,7 @@ function PredictView({ hitter, hitterProfile, deviceConnected }) {
                   <span style={{
                     padding: "5px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
                     background: dangerBg, color: dangerColor,
-                  }}>{danger} DANGER</span>
+                  }}>{danger}</span>
                 )}
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
