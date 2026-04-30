@@ -137,6 +137,13 @@
         .filter-row label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.82em; color: #8b949e; cursor: pointer; }
         .filter-row input[type="checkbox"] { width: auto; }
 
+        /* View toggle */
+        .view-toggle { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
+        .view-toggle span { font-size:0.82em; color:#6e7681; }
+        .view-btn { padding:3px 10px; border-radius:4px; border:1px solid #30363d; background:#21262d; color:#8b949e; cursor:pointer; font-size:0.78em; font-family:inherit; font-weight:bold; transition:all .15s; }
+        .view-btn:hover { border-color:#58a6ff; color:#c9d1d9; }
+        .view-btn.active { background:#1f6feb; color:#fff; border-color:#1f6feb; }
+
         /* Low confidence warning */
         .low-confidence { background: #3d2e00; border: 1px solid #d29922; color: #d29922; padding: 8px 12px; border-radius: 4px; font-size: 0.85em; margin-top: 8px; }
 
@@ -158,6 +165,24 @@
         @keyframes resultFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .result-fade { animation: resultFadeIn 0.2s ease; }
 
+        /* UI version switcher */
+        #ui-switcher-bar {
+            position: fixed; right: 16px; top: 14px;
+            z-index: 1000; display: flex; flex-direction: row; gap: 4px;
+        }
+        .ui-ver-btn {
+            padding: 5px 14px; border-radius: 5px;
+            border: 1px solid #30363d; background: rgba(22,27,34,0.88);
+            color: #6e7681; cursor: pointer;
+            font-family: inherit; font-size: 0.75em; font-weight: bold;
+            letter-spacing: 0.04em; transition: all .15s;
+            backdrop-filter: blur(6px);
+        }
+        .ui-ver-btn:hover { border-color: #58a6ff; color: #c9d1d9; }
+        .ui-ver-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+        #tablet-view { display: none; }
+        #tablet-view iframe { width: 100%; height: 100vh; border: none; display: block; }
+
         /* About panel */
         .about-panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 28px 32px; margin-bottom: 24px; }
         .about-panel .about-lead { font-size: 1.05em; color: #c9d1d9; line-height: 1.75; margin-bottom: 18px; }
@@ -176,6 +201,11 @@
     </style>
 </head>
 <body>
+<div id="ui-switcher-bar">
+    <button class="ui-ver-btn active" id="btn-desktop" onclick="switchUI('desktop')">Desktop</button>
+    <button class="ui-ver-btn" id="btn-tablet" onclick="switchUI('tablet')">Tablet</button>
+</div>
+<div id="desktop-view">
     <header>
         <h1>Pitch Duel</h1>
         <p class="subtitle">Three-Stage Prediction Pipeline</p>
@@ -318,7 +348,12 @@
                 <!-- Interactive strike zone for location picking -->
                 <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:15px;">
                     <div>
-                        <label style="margin-bottom:8px;">Click to set pitch location <span style="color:#484f58;font-size:0.85em;">(pitcher's view)</span>:</label>
+                        <div class="view-toggle">
+                            <span>View:</span>
+                            <button class="view-btn view-btn-pitcher active" onclick="setView('pitcher')">Pitcher's View</button>
+                            <button class="view-btn view-btn-catcher" onclick="setView('catcher')">Catcher's View</button>
+                        </div>
+                        <label style="margin-bottom:8px;">Click to set pitch location <span class="view-label-text" style="color:#484f58;font-size:0.85em;">(pitcher's view)</span>:</label>
                         <div id="demo_zone_picker" style="cursor:crosshair;"></div>
                     </div>
                     <div style="flex:1;">
@@ -404,7 +439,12 @@
                         </div>
                     </div>
                     <div>
-                        <label style="margin-bottom:8px;display:block;">Click to set location <span style="color:#484f58;font-size:0.85em;">(pitcher's view)</span>:</label>
+                        <div class="view-toggle">
+                            <span>View:</span>
+                            <button class="view-btn view-btn-pitcher active" onclick="setView('pitcher')">Pitcher's View</button>
+                            <button class="view-btn view-btn-catcher" onclick="setView('catcher')">Catcher's View</button>
+                        </div>
+                        <label style="margin-bottom:8px;display:block;">Click to set location <span class="view-label-text" style="color:#484f58;font-size:0.85em;">(pitcher's view)</span>:</label>
                         <div id="ab_picker_svg" style="cursor:crosshair;"></div>
                         <div style="margin-top:10px;">
                             <label style="margin-bottom:4px;display:block;">At-Bat Zone:</label>
@@ -448,6 +488,31 @@
     </div>
 
     <script>
+        // ── View state (pitcher's view vs catcher's view) ────────────────────
+        // state.plate_x is ALWAYS stored in catcher's view. The view flag is a
+        // rendering concern only — no conversion happens outside the click boundary.
+        let currentView = 'pitcher';  // 'pitcher' | 'catcher'
+        let demoCatcherPlateX = 0.0;  // canonical catcher's-view plate_x for predict tab
+
+        function setView(v) {
+            currentView = v;
+            document.querySelectorAll('.view-btn-pitcher').forEach(b => b.classList.toggle('active', v === 'pitcher'));
+            document.querySelectorAll('.view-btn-catcher').forEach(b => b.classList.toggle('active', v === 'catcher'));
+            const label = v === 'pitcher' ? "pitcher's view" : "catcher's view";
+            document.querySelectorAll('.view-label-text').forEach(el => el.textContent = `(${label})`);
+            // Update demo field to display in new view (no state change)
+            const displayPx = v === 'pitcher' ? -demoCatcherPlateX : demoCatcherPlateX;
+            const demoField = document.getElementById('plate_x_demo');
+            if (demoField) demoField.value = displayPx.toFixed(1);
+            syncDemoZone();
+            // Update all ab pitch display fields
+            ab_pitches.forEach((p, idx) => {
+                const el = document.getElementById(`ab_px_${idx}`);
+                if (el) el.value = (v === 'pitcher' ? -p.plate_x : p.plate_x).toFixed(1);
+            });
+            syncAbPicker();
+        }
+
         // ── Pitch-type defaults for advanced inputs ──────────────────────────
         const PITCH_DEFAULTS = {
             FF: { spin: 2400, pfx_x: -0.5, pfx_z:  1.2, rel_x: -1.5, rel_z: 6.0, ext: 6.3, speed: 95 },
@@ -499,7 +564,9 @@
             }
             if (mode === 'demo') {
                 set('release_speed_demo', p.speed);
-                set('plate_x_demo', p.plate_x);
+                // p.plate_x is catcher's view; display according to active view
+                demoCatcherPlateX = p.plate_x;
+                set('plate_x_demo', currentView === 'pitcher' ? -p.plate_x : p.plate_x);
                 set('plate_z_demo', p.plate_z);
                 const pThrowsSel = document.getElementById('p_throws_demo');
                 if (pThrowsSel) pThrowsSel.value = p.p_throws;
@@ -567,7 +634,7 @@
                     const side = getEffectiveStand(hitter, pThrows);
                     const sw = (HITTER_STAND[hitter] === 'S');
                     document.getElementById('ab_picker_svg').innerHTML =
-                        buildPickerZoneSvg(400, 250, null, null, side, sw, _absZone_atbat);
+                        buildPickerZoneSvg(400, 250, null, null, side, sw, _absZone_atbat, currentView);
                     attachAbPickerClick();
                 }
             } catch (e) { console.error('hitter card error:', e); }
@@ -677,6 +744,7 @@
             const showNumbers = opts.showNumbers !== false;
             const filters = opts.filters || {};
             const absZone = opts.absZone || null;
+            const view = opts.view || 'catcher'; // default catcher's view (Statcast) for game log
             const r = sz >= 400 ? 14 : (sz >= 250 ? 10 : 8);
             const fs = sz >= 400 ? 11 : (sz >= 250 ? 8 : 7);
 
@@ -715,7 +783,8 @@
             });
 
             for (const p of fp) {
-                const pos = pitchToSvg(p.plate_x, p.plate_z, sz);
+                const displayX = view === 'pitcher' ? -p.plate_x : p.plate_x;
+                const pos = pitchToSvg(displayX, p.plate_z, sz);
                 const color = p.quality_color || dangerColor(p.p_hard || p.p_hard_contact || p.xwoba_pred || 0);
                 const tip = `${p.pitch_type} #${p.pitch_num} | ${p.speed||''}mph | P(hard)=${((p.p_hard || p.p_hard_contact||p.xwoba_pred||0)).toFixed(3)}${p.description?' | '+p.description:''}`;
                 svg += `<circle cx="${pos.x}" cy="${pos.y}" r="${r}" fill="${color}" fill-opacity="0.85" stroke="#0d1117" stroke-width="1.5"><title>${tip}</title></circle>`;
@@ -726,11 +795,11 @@
             return svg;
         }
 
-        function batterSilhouette(cx, cy, side, scale) {
+        function batterSilhouette(cx, cy, side, scale, view = 'pitcher') {
             const s = scale || 1;
-            // SVG paths natively depict a LHH (facing right, bat on right).
-            // RHH needs horizontal mirror; LHH keeps native orientation.
-            const flip = side === 'R' ? 1 : -1;
+            // Native path: LHH. Flip logic depends on view so the batter always faces correctly.
+            const pitcherFlip = side === 'R' ? 1 : -1;
+            const flip = view === 'pitcher' ? pitcherFlip : -pitcherFlip;
             // SVG is ~101 wide, ~270 tall. Scale to ~80px tall at base (sz=220).
             const pathScale = 200 / 270;
             const ts = pathScale * s;
@@ -745,7 +814,7 @@
             return g;
         }
 
-        function buildPickerZoneSvg(w, h, markerX, markerZ, batterSide, isSwitch, absZone) {
+        function buildPickerZoneSvg(w, h, markerX, markerZ, batterSide, isSwitch, absZone, view = 'pitcher') {
             // Zone is drawn based on h (height). Extra width provides space for batter silhouettes.
             const pad = (w - h) / 2;  // horizontal padding on each side
             // Offset pitch coords into the centered zone area
@@ -781,22 +850,24 @@
             const hp = pToSvg(0, 0.9), hpW = fToPx(17/12);
             svg += `<polygon points="${hp.x},${hp.y+6} ${hp.x-hpW/2},${hp.y} ${hp.x-hpW/2},${hp.y-6} ${hp.x+hpW/2},${hp.y-6} ${hp.x+hpW/2},${hp.y}" fill="none" stroke="#484f58" stroke-width="1"/>`;
 
-            // Batter silhouette
+            // Batter silhouette — position depends on view
+            // Pitcher's view: RHH right, LHH left | Catcher's view: RHH left, LHH right
             if (batterSide) {
-                const scale = h / 220;  // normalize to base size
-                // RHH on right side, LHH on left side — use full width for positioning
-                const bx = batterSide === 'R' ? w - 18 * scale : 18 * scale;
+                const scale = h / 220;
+                const onRight = (batterSide === 'R') === (view === 'pitcher');
+                const bx = onRight ? w - 18 * scale : 18 * scale;
                 const by = hp.y - 2;
-                svg += batterSilhouette(bx, by, batterSide, scale);
-                // Batting side label
-                const labelX = batterSide === 'R' ? w - 8 : 8;
-                const anchor = batterSide === 'R' ? 'end' : 'start';
+                svg += batterSilhouette(bx, by, batterSide, scale, view);
+                const labelX = onRight ? w - 8 : 8;
+                const anchor = onRight ? 'end' : 'start';
                 const label = isSwitch ? `SW(${batterSide})` : `${batterSide}HH`;
                 svg += `<text x="${labelX}" y="24" text-anchor="${anchor}" fill="${isSwitch ? '#d29922' : '#484f58'}" font-size="${10*scale}px" font-family="Courier New">${label}</text>`;
             }
 
+            // markerX is always catcher's view — flip to display coordinate
             if (markerX !== null && markerZ !== null) {
-                const pos = pToSvg(markerX, markerZ);
+                const displayX = view === 'pitcher' ? -markerX : markerX;
+                const pos = pToSvg(displayX, markerZ);
                 svg += `<circle cx="${pos.x}" cy="${pos.y}" r="8" fill="#58a6ff" fill-opacity="0.9" stroke="#fff" stroke-width="2"/>`;
                 svg += `<line x1="${pos.x-12}" y1="${pos.y}" x2="${pos.x+12}" y2="${pos.y}" stroke="#58a6ff" stroke-width="1" opacity="0.5"/>`;
                 svg += `<line x1="${pos.x}" y1="${pos.y-12}" x2="${pos.x}" y2="${pos.y+12}" stroke="#58a6ff" stroke-width="1" opacity="0.5"/>`;
@@ -883,15 +954,17 @@
         // ================================================================
 
         function syncDemoZone() {
-            const px = parseFloat(document.getElementById('plate_x_demo').value);
+            const displayPx = parseFloat(document.getElementById('plate_x_demo').value);
             const pz = parseFloat(document.getElementById('plate_z_demo').value);
-            if (isNaN(px) || isNaN(pz)) return;
+            if (isNaN(displayPx) || isNaN(pz)) return;
+            // Always derive catcher's-view state from the current display field + active view
+            demoCatcherPlateX = currentView === 'pitcher' ? -displayPx : displayPx;
             const hitter = document.getElementById('hitter_demo').value;
             const pThrows = document.getElementById('p_throws_demo').value;
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
             const container = document.getElementById('demo_zone_picker');
-            container.innerHTML = buildPickerZoneSvg(400, 250, px, pz, side, sw, _absZone_demo);
+            container.innerHTML = buildPickerZoneSvg(400, 250, demoCatcherPlateX, pz, side, sw, _absZone_demo, currentView);
             attachDemoZoneClick();
         }
 
@@ -907,6 +980,9 @@
                 const svgX = (e.clientX - rect.left) * (w / rect.width);
                 const svgY = (e.clientY - rect.top) * (h / rect.height);
                 const coords = svgToPitch(svgX - pad, svgY, h);
+                // Single flip point: convert click coord (display space) → catcher's view
+                demoCatcherPlateX = currentView === 'pitcher' ? -coords.px : coords.px;
+                // Display field shows value in current view (coords.px is always the display value)
                 document.getElementById('plate_x_demo').value = coords.px.toFixed(1);
                 document.getElementById('plate_z_demo').value = coords.pz.toFixed(1);
                 syncDemoZone();
@@ -921,7 +997,7 @@
             const hitter_name   = document.getElementById('hitter_demo').value;
             const pitch_type    = document.getElementById('pitch_type_demo').value;
             const release_speed = parseFloat(document.getElementById('release_speed_demo').value);
-            const plate_x       = parseFloat(document.getElementById('plate_x_demo').value);
+            const plate_x       = demoCatcherPlateX; // always catcher's view; no conversion needed
             const plate_z       = parseFloat(document.getElementById('plate_z_demo').value);
             const balls         = parseInt(document.getElementById('balls_demo').value);
             const strikes       = parseInt(document.getElementById('strikes_demo').value);
@@ -1200,7 +1276,7 @@
             const pThrows = document.getElementById('p_throws_atbat').value;
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
-            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(400, 250, null, null, side, sw, _absZone_atbat);
+            document.getElementById('ab_picker_svg').innerHTML = buildPickerZoneSvg(400, 250, null, null, side, sw, _absZone_atbat, currentView);
         }
 
         function updateAbZone() {
@@ -1212,7 +1288,7 @@
                 speed: ab_pitches[i].release_speed,
                 p_hard: r.blend.p_hard,
             }));
-            document.getElementById('ab_zone_svg').innerHTML = buildZoneSvg(zonePitches, 250, {showNumbers: true, absZone: _absZone_atbat});
+            document.getElementById('ab_zone_svg').innerHTML = buildZoneSvg(zonePitches, 250, {showNumbers: true, absZone: _absZone_atbat, view: currentView});
         }
 
         let ab_active_idx = null; // which pitch row the zone picker targets
@@ -1244,7 +1320,7 @@
                         <input type="number" id="ab_speed_${idx}" step="0.1" value="${d.speed}" placeholder="MPH"
                                oninput="ab_pitches[${idx}].release_speed=parseFloat(this.value)">
                         <input type="number" id="ab_px_${idx}" step="0.1" value="0" placeholder="Plate X"
-                               oninput="ab_pitches[${idx}].plate_x=parseFloat(this.value); syncAbPicker();">
+                               oninput="ab_pitches[${idx}].plate_x=(currentView==='pitcher'?-parseFloat(this.value):parseFloat(this.value)); syncAbPicker();">
                         <input type="number" id="ab_pz_${idx}" step="0.1" value="2.5" placeholder="Plate Z"
                                oninput="ab_pitches[${idx}].plate_z=parseFloat(this.value); syncAbPicker();">
                         <button id="throw_btn_${idx}" style="padding:8px 12px;width:auto;background:#1f6feb;color:#fff;border:none;border-radius:4px;font-family:inherit;font-weight:bold;font-size:0.9em;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='#388bfd'" onmouseout="if(!this.dataset.thrown)this.style.background='#1f6feb'" onclick="throwPitch(${idx})">Throw</button>
@@ -1313,7 +1389,7 @@
             const side = getEffectiveStand(hitter, pThrows);
             const sw = (HITTER_STAND[hitter] === 'S');
             const container = document.getElementById('ab_picker_svg');
-            container.innerHTML = buildPickerZoneSvg(400, 250, pitch.plate_x, pitch.plate_z, side, sw, _absZone_atbat);
+            container.innerHTML = buildPickerZoneSvg(400, 250, pitch.plate_x, pitch.plate_z, side, sw, _absZone_atbat, currentView);
             attachAbPickerClick();
         }
 
@@ -1331,9 +1407,10 @@
                 const svgY = (e.clientY - rect.top) * (h / rect.height);
                 const coords = svgToPitch(svgX - pad, svgY, h);
                 const idx = ab_active_idx;
-                ab_pitches[idx].plate_x = parseFloat(coords.px.toFixed(1));
+                // Single flip point: store in catcher's view
+                ab_pitches[idx].plate_x = parseFloat((currentView === 'pitcher' ? -coords.px : coords.px).toFixed(1));
                 ab_pitches[idx].plate_z = parseFloat(coords.pz.toFixed(1));
-                // Sync input fields
+                // Display in current view (coords.px is always the display value)
                 const pxEl = document.getElementById(`ab_px_${idx}`);
                 const pzEl = document.getElementById(`ab_pz_${idx}`);
                 if (pxEl) pxEl.value = coords.px.toFixed(1);
@@ -1782,5 +1859,24 @@
             syncAbPicker();
         });
     </script>
+</div><!-- #desktop-view -->
+
+<div id="tablet-view">
+    <iframe id="tablet-iframe"></iframe>
+</div>
+
+<script>
+    function switchUI(mode) {
+        const isTablet = mode === 'tablet';
+        document.getElementById('desktop-view').style.display = isTablet ? 'none' : '';
+        document.getElementById('tablet-view').style.display  = isTablet ? 'block' : 'none';
+        document.getElementById('btn-desktop').classList.toggle('active', !isTablet);
+        document.getElementById('btn-tablet').classList.toggle('active',  isTablet);
+        if (isTablet) {
+            const ifr = document.getElementById('tablet-iframe');
+            if (!ifr.getAttribute('src')) ifr.setAttribute('src', '/tablet');
+        }
+    }
+</script>
 </body>
 </html>
