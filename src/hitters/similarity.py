@@ -99,6 +99,7 @@ _HIT_EVENTS = {"single", "double", "triple", "home_run"}
 
 _norm_cache: dict = {}    # str(data_path) -> {"means": ndarray, "stds": ndarray}
 _hitter_cache: dict = {}  # (player_id, str(data_path)) -> DataFrame
+_name_id_cache: dict = {} # str(data_path) -> {player_name: player_id} (pre-built indexes only)
 
 
 # ---------------------------------------------------------------------------
@@ -135,13 +136,31 @@ class SimilarityResult:
 
 def _load_norm_stats(data_path: Path) -> tuple:
     """
-    Compute and cache per-feature mean and std from the training set.
-    Uses only rows where game_date < TRAIN_CUTOFF to avoid test-set leakage.
+    Load and cache per-feature mean and std.
+
+    If a companion ``{stem}_norm_stats.json`` file exists next to data_path,
+    load pre-computed stats from it (and populate _name_id_cache if the JSON
+    contains a name_to_id mapping).  Otherwise compute from the training rows
+    of the parquet (rows before TRAIN_CUTOFF).
+
     Returns (means, stds) as 1-D arrays aligned to DISTANCE_FEATURES order.
     """
+    import json as _json
+
     key = str(data_path)
     if key in _norm_cache:
         return _norm_cache[key]["means"], _norm_cache[key]["stds"]
+
+    norm_json = data_path.with_name(data_path.stem + "_norm_stats.json")
+    if norm_json.exists():
+        with open(norm_json) as f:
+            stats = _json.load(f)
+        means = np.array(stats["means"], dtype=float)
+        stds  = np.array(stats["stds"],  dtype=float)
+        if "name_to_id" in stats:
+            _name_id_cache[key] = {n: int(i) for n, i in stats["name_to_id"].items()}
+        _norm_cache[key] = {"means": means, "stds": stds}
+        return means, stds
 
     print("Computing normalization stats from training set...")
     df = pd.read_parquet(data_path, columns=["game_date"] + DISTANCE_FEATURES)
@@ -285,13 +304,23 @@ def find_similar_pitches(
     Returns:
         SimilarityResult dataclass
     """
-    # Resolve player_id from name
-    from src.hitters.profiles import get_player_id
-    batter_df = pd.read_parquet(data_path, columns=["batter"])
-    player_id = get_player_id(hitter_name, batter_df)
-
-    # Load norm stats first so we can use them for NaN imputation
+    # Load norm stats first — also populates _name_id_cache for pre-built indexes
     means, stds = _load_norm_stats(data_path)
+
+    # Resolve player_id: use pre-built map if available (avoids pybaseball network call)
+    key = str(data_path)
+    if key in _name_id_cache:
+        name_map = _name_id_cache[key]
+        player_id = name_map.get(hitter_name)
+        if player_id is None:
+            raise ValueError(
+                f"Hitter '{hitter_name}' not in similarity index. "
+                f"Available: {list(name_map.keys())}"
+            )
+    else:
+        from src.hitters.profiles import get_player_id
+        batter_df = pd.read_parquet(data_path, columns=["batter"])
+        player_id = get_player_id(hitter_name, batter_df)
 
     # Load this hitter's pitch history
     hitter_df = _load_hitter_pitches(player_id, data_path, means)

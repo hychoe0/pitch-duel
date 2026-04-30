@@ -96,6 +96,7 @@ def predict_matchup(
     show_evidence: bool = True,
     league: str = "MLB",
     fallback_to_mlb: bool = True,
+    similarity_data_path: Path | None = None,
 ) -> MatchupResult:
     """
     Run both model prediction and historical similarity lookup,
@@ -128,12 +129,11 @@ def predict_matchup(
     outcome_dist = {}
 
     try:
-        sim_result = find_similar_pitches(
-            pitch=pitch,
-            hitter_name=hitter_name,
-            n_matches=50,
-            match_count=True,
-        )
+        sim_kwargs: dict = dict(pitch=pitch, hitter_name=hitter_name,
+                                n_matches=50, match_count=True)
+        if similarity_data_path is not None:
+            sim_kwargs["data_path"] = similarity_data_path
+        sim_result = find_similar_pitches(**sim_kwargs)
         n_similar  = sim_result.n_matches
         confidence = sim_result.confidence
 

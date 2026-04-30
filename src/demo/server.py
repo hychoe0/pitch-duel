@@ -29,6 +29,10 @@ MODEL_DIR = ROOT / "models"
 MODEL_V2_DIR = ROOT / "models_v2"
 DEMO_MODE = os.environ.get("PITCH_DUEL_DEMO", "").lower() in ("1", "true", "yes")
 
+# Pre-built similarity index for demo/Render deployments (committed to repo)
+_DEMO_SIM_INDEX = ROOT / "data/processed/profiles_demo/similarity_index.parquet"
+DEMO_SIM_PATH: Path | None = _DEMO_SIM_INDEX if _DEMO_SIM_INDEX.exists() else None
+
 # Model version registry
 MODEL_VERSIONS = {
     "v1": {
@@ -325,7 +329,11 @@ def predict_demo():
                 pitch_dict[k] = v
 
         # Run blended prediction (model + historical similarity)
-        mr = predict_matchup(pitch_dict, hitter_name, model_dir=model_dir, show_evidence=True)
+        # Use pre-built demo index when available (avoids needing full parquet on Render)
+        mr = predict_matchup(
+            pitch_dict, hitter_name, model_dir=model_dir, show_evidence=True,
+            similarity_data_path=DEMO_SIM_PATH,
+        )
 
         # Load hitter profile for display
         hitter_profile = _load_hitter_profile_for_display(hitter_name)

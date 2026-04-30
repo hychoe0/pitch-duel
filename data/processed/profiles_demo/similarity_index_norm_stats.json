@@ -1,0 +1,46 @@
+{
+  "features": [
+    "release_speed",
+    "pfx_x",
+    "pfx_z",
+    "plate_x",
+    "plate_z",
+    "release_spin_rate",
+    "release_extension"
+  ],
+  "means": [
+    88.81909675055444,
+    -0.12334343133370214,
+    0.660207348005524,
+    0.025565387832912095,
+    2.2675592614829023,
+    2225.362565794958,
+    6.180003372067632
+  ],
+  "stds": [
+    6.050602948847365,
+    0.8861049630763684,
+    0.744338734979437,
+    0.8665705402694767,
+    0.9619353771776701,
+    335.78475099386844,
+    0.5209120122661676
+  ],
+  "name_to_id": {
+    "Judge, Aaron": 592450,
+    "Betts, Mookie": 605141,
+    "Kiner-Falefa, Isiah": 643396,
+    "Ohtani, Shohei": 660271,
+    "Raleigh, Cal": 663728,
+    "Soto, Juan": 665742,
+    "Witt, Bobby": 677951,
+    "Duran, Jarren": 680776,
+    "Carroll, Corbin": 682998,
+    "Henderson, Gunnar": 683002,
+    "Volpe, Anthony": 683011,
+    "Caissie, Owen": 683357,
+    "Winn, Masyn": 691026,
+    "Langford, Wyatt": 694671,
+    "Lee, Jung Hoo": 808982
+  }
+}
