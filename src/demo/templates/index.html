@@ -173,9 +173,6 @@
         @media (max-width: 600px) { .about-cols { grid-template-columns: 1fr; } }
         .about-col-head { font-size: 0.78em; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; font-weight: bold; }
         .about-col-body { font-size: 0.84em; color: #8b949e; line-height: 1.7; }
-        .about-toggle { background: none; border: none; color: #6e7681; font-size: 0.8em; font-family: inherit; cursor: pointer; padding: 0; margin-top: 14px; text-decoration: underline; text-underline-offset: 3px; }
-        .about-toggle:hover { color: #8b949e; }
-        .about-collapsible { overflow: hidden; transition: max-height 0.3s ease; }
     </style>
 </head>
 <body>
@@ -247,31 +244,6 @@
                     </div>
                 </div>
 
-                <div id="about-extra" class="about-collapsible" style="max-height:0;">
-                    <hr class="about-divider">
-                    <p>
-                        Under the hood, the model runs three XGBoost classifiers in sequence —
-                        P(swing), P(contact&nbsp;|&nbsp;swing), P(hard&nbsp;contact&nbsp;|&nbsp;contact) —
-                        plus a parallel expected-damage regressor for contact quality.
-                        Each prediction draws on 80 features covering pitch mechanics, game context,
-                        and 50+ hitter-specific behavioral rates computed from Statcast data through 2025.
-                        A historical similarity lookup runs alongside the model and blends empirical
-                        outcomes from the hitter's real plate appearance history against pitches like yours.
-                    </p>
-                    <p>
-                        Hitter profiles are built from recency-weighted Statcast data — 2025 pitches count
-                        3× more than 2021 — so the model reflects how hitters look <em>today</em>, not
-                        who they were five years ago. Switch hitters are handled automatically:
-                        select the pitcher's handedness and the model bats them from the correct side.
-                        Hitters with thin MLB samples blend toward league-average baselines rather than
-                        producing unreliable predictions.
-                    </p>
-                    <p style="color:#6e7681;font-size:0.85em;">
-                        Current model: XGBoost v2 trained on 2015–2025 Statcast (2020 excluded) |
-                        Swing AUC 0.8807 · Contact AUC 0.8032 · Hard Contact AUC 0.7277
-                    </p>
-                </div>
-                <button class="about-toggle" onclick="toggleAbout(this)">+ show model details</button>
             </div>
         </div>
 
@@ -605,18 +577,6 @@
             const el = document.getElementById(id);
             el.classList.toggle('open');
             btn.textContent = el.classList.contains('open') ? '- Advanced pitch inputs' : '+ Advanced pitch inputs';
-        }
-
-        function toggleAbout(btn) {
-            const el = document.getElementById('about-extra');
-            const open = el.style.maxHeight !== '0px' && el.style.maxHeight !== '';
-            if (open) {
-                el.style.maxHeight = '0';
-                btn.textContent = '+ show model details';
-            } else {
-                el.style.maxHeight = el.scrollHeight + 'px';
-                btn.textContent = '− hide model details';
-            }
         }
 
         // ── Tab switching ────────────────────────────────────────────────────
@@ -1053,7 +1013,7 @@
             html += `<div class="pipeline-section">
                 <div class="section-header">
                     <span class="section-tag">A</span>
-                    <span class="section-title">Path A: XGBoost Model</span>
+                    <span class="section-title">Path A</span>
                 </div>
                 ${stageBar('P(Swing)', m.p_swing, swingColor)}
                 ${stageBar('P(Contact | Swing)', m.p_contact, contactColor)}
@@ -1072,26 +1032,7 @@
                        </div>`
                     : ''
                 }
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:15px;">`;
-
-            for (const [stage, stageLabel] of [['swing','Swing Drivers'],['contact','Contact Drivers'],['hard_contact','Hard Contact Drivers']]) {
-                html += `<div><div style="font-size:0.82em;color:#79c0ff;margin-bottom:8px;">${stageLabel}</div><div class="driver-list">`;
-                const drivers = m.stage_drivers[stage] || [];
-                const maxImp = drivers.length > 0 ? drivers[0].importance : 1;
-                for (const d of drivers) {
-                    const pct = (d.importance * 100).toFixed(1);
-                    const barW = Math.round((d.importance / maxImp) * 100);
-                    const isHitter = d.feature.startsWith('hitter_');
-                    const barColor = isHitter ? '#8b5cf6' : '#58a6ff';
-                    html += `<div class="driver-row">
-                        <div class="driver-name" ${isHitter ? 'style="color:#8b5cf6;"' : ''}>${prettyFeature(d.feature)}</div>
-                        <div class="driver-bar-track"><div class="driver-bar-fill" style="width:${barW}%;background:${barColor};"></div></div>
-                        <div class="driver-pct">${pct}%</div>
-                    </div>`;
-                }
-                html += '</div></div>';
-            }
-            html += '</div></div>';
+            </div>`;
 
             // ── Section 3: Path B — Historical Similarity ──
             const h = data.historical;
