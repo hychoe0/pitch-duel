@@ -111,3 +111,55 @@ def test_resolver_returns_all_five_global_rates():
     for key in ("hitter_swing_rate", "hitter_chase_rate", "hitter_contact_rate",
                 "hitter_hard_hit_rate", "hitter_whiff_rate"):
         assert key in result
+
+
+# ---------------------------------------------------------------------------
+# compute_zone_xwoba_rates
+# ---------------------------------------------------------------------------
+
+def test_zone_xwoba_omits_thin_zone():
+    from src.hitters.profiles import compute_zone_xwoba_rates
+    # zone 1: 5 batted balls (below MIN_ZONE_BATTED_BALLS=10) — should be omitted
+    # zone 5: 15 batted balls — should be present
+    df, w = _make_batted_ball_df({1: 5, 5: 15})
+    result = compute_zone_xwoba_rates(df, w)
+    assert "1" not in result, "Thin zone should be omitted, not filled"
+    assert "5" in result
+    assert result["5"] == pytest.approx(0.50)
+
+
+def test_zone_xwoba_weighted_mean():
+    from src.hitters.profiles import compute_zone_xwoba_rates
+    # 10 rows with xwoba=0.80, 10 rows with xwoba=0.20 → weighted mean 0.50
+    rows = (
+        [{"description": "hit_into_play", "zone": 5.0,
+          "estimated_woba_using_speedangle": 0.80,
+          "launch_speed": 98.0, "game_date": pd.Timestamp("2024-06-01")}] * 10
+        + [{"description": "hit_into_play", "zone": 5.0,
+            "estimated_woba_using_speedangle": 0.20,
+            "launch_speed": 85.0, "game_date": pd.Timestamp("2024-06-01")}] * 10
+    )
+    df = pd.DataFrame(rows)
+    w = np.ones(len(df))
+    result = compute_zone_xwoba_rates(df, w)
+    assert result["5"] == pytest.approx(0.50)
+
+
+def test_zone_xwoba_excludes_non_batted_ball_descriptions():
+    from src.hitters.profiles import compute_zone_xwoba_rates
+    rows = [
+        # These should be counted
+        {"description": "hit_into_play", "zone": 5.0,
+         "estimated_woba_using_speedangle": 0.80,
+         "launch_speed": 98.0, "game_date": pd.Timestamp("2024-06-01")},
+    ] * 15 + [
+        # Swinging strike — should NOT be counted toward batted balls
+        {"description": "swinging_strike", "zone": 5.0,
+         "estimated_woba_using_speedangle": None,
+         "launch_speed": None, "game_date": pd.Timestamp("2024-06-01")},
+    ] * 100
+    df = pd.DataFrame(rows)
+    w = np.ones(len(df))
+    result = compute_zone_xwoba_rates(df, w)
+    # Only the 15 batted balls count; result should reflect xwoba=0.80
+    assert result["5"] == pytest.approx(0.80)

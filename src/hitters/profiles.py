@@ -329,6 +329,31 @@ def compute_family_whiff_rates(df: pd.DataFrame, w: np.ndarray, fallback: float)
     return result
 
 
+def compute_zone_xwoba_rates(df: pd.DataFrame, w: np.ndarray) -> dict:
+    """
+    Weighted mean estimated_woba_using_speedangle per Statcast zone, batted balls only.
+    Zones with weighted batted-ball count < MIN_ZONE_BATTED_BALLS are omitted.
+    Returns str(zone_id) -> float.
+    """
+    batted_mask = (
+        df["description"].isin({"hit_into_play", "hit_into_play_no_out", "hit_into_play_score"})
+        & df["estimated_woba_using_speedangle"].notna()
+        & df["zone"].notna()
+    )
+    valid = df[batted_mask].copy()
+    valid_w = w[df.index.get_indexer(valid.index)]
+    result = {}
+    for z in ALL_ZONES:
+        mask = valid["zone"] == z
+        grp = valid[mask]
+        grp_w = valid_w[valid.index.get_indexer(grp.index)]
+        if grp_w.sum() >= MIN_ZONE_BATTED_BALLS:
+            result[str(z)] = float(np.average(
+                grp["estimated_woba_using_speedangle"].values, weights=grp_w
+            ))
+    return result
+
+
 def compute_contact_rate_by_pitch_type(df: pd.DataFrame, w: np.ndarray) -> dict:
     # Pre-2023 Statcast labeled sweepers as "SV"; 2023+ uses "ST".
     # Merge pre-2023 SV rows into the ST bucket so the sweeper feature
