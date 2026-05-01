@@ -870,6 +870,25 @@ def list_available_hitters(league: str = "MLB") -> list[str]:
     return sorted(names)
 
 
+DEMO_HITTERS: dict[str, int] = {
+    "Judge, Aaron":           592450,
+    "Betts, Mookie":          605141,
+    "Kiner-Falefa, Isiah":    643396,
+    "Ohtani, Shohei":         660271,
+    "Raleigh, Cal":           663728,
+    "Soto, Juan":             665742,
+    "Witt, Bobby":            677951,
+    "Duran, Jarren":          680776,
+    "Carroll, Corbin":        682998,
+    "Henderson, Gunnar":      683002,
+    "Volpe, Anthony":         683011,
+    "Caissie, Owen":          683357,
+    "Winn, Masyn":            691026,
+    "Langford, Wyatt":        694671,
+    "Lee, Jung Hoo":          808982,
+}
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -889,21 +908,45 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Build hitter profiles")
-    parser.add_argument("--name",  type=str, help="Build profile for a single player by name")
-    parser.add_argument("--names", type=str, nargs="+", help="Build profiles for multiple players by name")
+    parser.add_argument("--name",         type=str,            help="Build profile for a single player by name")
+    parser.add_argument("--names",        type=str, nargs="+", help="Build profiles for multiple players by name")
+    parser.add_argument("--rebuild-demo", action="store_true", help="Force-rebuild the 15 demo hitter profiles")
     args = parser.parse_args()
 
     df = pd.read_parquet("data/processed/statcast_processed.parquet")
 
-    if args.names:
-        # Targeted multi-player build — does NOT touch any other profiles
-        _build_name_cache([])  # pre-warm lookup table once
+    if args.rebuild_demo:
+        demo_ids = list(DEMO_HITTERS.values())
+        _build_name_cache(demo_ids)
+        # Seed name cache with known names as fallback if lookup missed a player
+        for name, pid in DEMO_HITTERS.items():
+            _NAME_CACHE.setdefault(pid, name)
+        print(f"\nRebuilding {len(DEMO_HITTERS)} demo hitter profiles...\n")
+        for name, pid in DEMO_HITTERS.items():
+            try:
+                profile = build_profile(pid, df)
+                save_profile(profile)
+                z5  = profile.zone_xwoba_rates.get("5")
+                z14 = profile.zone_xwoba_rates.get("14")
+                z5_str  = f"{z5:.3f}"  if z5  is not None else "—"
+                z14_str = f"{z14:.3f}" if z14 is not None else "—"
+                print(
+                    f"  {profile.player_name:<25} "
+                    f"n={profile.sample_size:>6,}  "
+                    f"zones={len(profile.zone_xwoba_rates):>2}  "
+                    f"z5={z5_str}  z14={z14_str}"
+                )
+            except Exception as e:
+                print(f"  ERROR — {name}: {e}")
+
+    elif args.names:
+        _build_name_cache([])
         targets = args.names
         print(f"\nBuilding profiles for {len(targets)} player(s)...\n")
         for name in targets:
             try:
                 pid = get_player_id(name, df)
-                _NAME_CACHE[pid] = _NAME_CACHE.get(pid) or name  # fallback if lookup missed
+                _NAME_CACHE[pid] = _NAME_CACHE.get(pid) or name
                 profile = build_profile(pid, df)
                 save_profile(profile)
                 _print_profile(profile)
