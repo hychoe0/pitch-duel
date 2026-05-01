@@ -534,6 +534,8 @@ def build_profile(
         contact_rate_by_pitch_type=compute_contact_rate_by_pitch_type(sub, w) if n > 0 else {},
         zone_swing_rates=compute_zone_swing_rates(sub, w, swing_rate) if n > 0 else {z: swing_rate for z in ALL_ZONES},
         zone_whiff_rates=compute_zone_whiff_rates(sub, w, whiff_rate) if n > 0 else {z: whiff_rate for z in ALL_ZONES},
+        zone_xwoba_rates=compute_zone_xwoba_rates(sub, w) if n > 0 else {},
+        zone_hard_hit_rates=compute_zone_hard_hit_rates(sub, w) if n > 0 else {},
         family_swing_rates=compute_family_swing_rates(sub, w, swing_rate) if n > 0 else {f: swing_rate for f in PITCH_FAMILY_LIST},
         family_whiff_rates=compute_family_whiff_rates(sub, w, whiff_rate) if n > 0 else {f: whiff_rate for f in PITCH_FAMILY_LIST},
         sample_size=n,
