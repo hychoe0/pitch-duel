@@ -542,6 +542,30 @@ def profile_to_feature_dict(profile: HitterProfile) -> dict:
     return d
 
 
+def resolve_hitter_features_for_pitch(
+    profile: "HitterProfile",
+    zone: int,
+) -> dict:
+    """
+    Returns the 5 global rate features plus zone-specific damage rates.
+    Falls back to LEAGUE_AVG["zone_xwoba"] for xwOBA (no hitter-global stored),
+    and to profile.hard_hit_rate for zone hard-hit rate (better prior than league avg).
+    """
+    return {
+        "hitter_swing_rate":          profile.swing_rate,
+        "hitter_chase_rate":          profile.chase_rate,
+        "hitter_contact_rate":        profile.contact_rate,
+        "hitter_hard_hit_rate":       profile.hard_hit_rate,
+        "hitter_whiff_rate":          profile.whiff_rate,
+        "hitter_zone_xwoba":          profile.zone_xwoba_rates.get(
+                                          str(zone), LEAGUE_AVG["zone_xwoba"]
+                                      ),
+        "hitter_zone_hard_hit_rate":  profile.zone_hard_hit_rates.get(
+                                          str(zone), profile.hard_hit_rate
+                                      ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------

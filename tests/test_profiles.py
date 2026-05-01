@@ -62,3 +62,52 @@ def test_legacy_profile_loads_without_new_fields():
     profile = HitterProfile(**_legacy_profile_dict())
     assert profile.zone_xwoba_rates == {}
     assert profile.zone_hard_hit_rates == {}
+
+
+# ---------------------------------------------------------------------------
+# resolve_hitter_features_for_pitch
+# ---------------------------------------------------------------------------
+
+def _minimal_profile(**overrides):
+    from src.hitters.profiles import HitterProfile
+    defaults = dict(
+        player_id=1, player_name="Test", stand="R",
+        swing_rate=0.47, chase_rate=0.30, contact_rate=0.78,
+        hard_hit_rate=0.40, whiff_rate=0.25,
+    )
+    defaults.update(overrides)
+    return HitterProfile(**defaults)
+
+
+def test_resolver_falls_back_to_league_avg_xwoba_when_zone_missing():
+    from src.hitters.profiles import resolve_hitter_features_for_pitch, LEAGUE_AVG
+    profile = _minimal_profile()  # zone_xwoba_rates = {} (default)
+    result = resolve_hitter_features_for_pitch(profile, zone=5)
+    assert result["hitter_zone_xwoba"] == pytest.approx(LEAGUE_AVG["zone_xwoba"])
+
+
+def test_resolver_falls_back_to_profile_hard_hit_rate_when_zone_missing():
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(hard_hit_rate=0.55)
+    result = resolve_hitter_features_for_pitch(profile, zone=5)
+    assert result["hitter_zone_hard_hit_rate"] == pytest.approx(0.55)
+
+
+def test_resolver_uses_zone_data_when_present():
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(
+        zone_xwoba_rates={"5": 0.72},
+        zone_hard_hit_rates={"5": 0.65},
+    )
+    result = resolve_hitter_features_for_pitch(profile, zone=5)
+    assert result["hitter_zone_xwoba"] == pytest.approx(0.72)
+    assert result["hitter_zone_hard_hit_rate"] == pytest.approx(0.65)
+
+
+def test_resolver_returns_all_five_global_rates():
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile()
+    result = resolve_hitter_features_for_pitch(profile, zone=5)
+    for key in ("hitter_swing_rate", "hitter_chase_rate", "hitter_contact_rate",
+                "hitter_hard_hit_rate", "hitter_whiff_rate"):
+        assert key in result
