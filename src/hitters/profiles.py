@@ -26,11 +26,12 @@ ZONE_Z_MIN, ZONE_Z_MAX = 1.5, 3.5     # feet from ground
 
 # League-average fallback values (2015-2022 MLB)
 LEAGUE_AVG = {
-    "swing_rate": 0.47,
-    "chase_rate": 0.30,
-    "contact_rate": 0.78,
+    "swing_rate":    0.47,
+    "chase_rate":    0.30,
+    "contact_rate":  0.78,
     "hard_hit_rate": 0.38,
-    "whiff_rate": 0.25,
+    "whiff_rate":    0.25,
+    "zone_xwoba":    0.380,  # MLB avg xwOBA on batted balls (pitch-clock era)
 }
 
 # Recency weights for hitter profiles — aggressive toward pitch-clock era
@@ -72,6 +73,7 @@ PITCH_FAMILY_LIST = ["fastball", "breaking", "offspeed", "other"]
 
 MIN_ZONE_PITCHES   = 20   # weighted pitches per zone before fallback
 MIN_FAMILY_PITCHES = 30   # weighted pitches per pitch family before fallback
+MIN_ZONE_BATTED_BALLS = 10   # tunable — adjust as model accuracy improves
 
 
 def _get_pitch_family(pitch_type: str) -> str:
@@ -140,6 +142,8 @@ class HitterProfile:
     contact_rate_by_pitch_type: dict = field(default_factory=dict) # pitch_type_str -> float
     zone_swing_rates: dict = field(default_factory=dict)           # zone_int -> float
     zone_whiff_rates: dict = field(default_factory=dict)           # zone_int -> float
+    zone_xwoba_rates: dict = field(default_factory=dict)           # str(zone_id) -> float
+    zone_hard_hit_rates: dict = field(default_factory=dict)        # str(zone_id) -> float
     family_swing_rates: dict = field(default_factory=dict)         # family_str -> float
     family_whiff_rates: dict = field(default_factory=dict)         # family_str -> float
     sample_size: int = 0
