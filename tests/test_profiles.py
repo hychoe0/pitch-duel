@@ -163,3 +163,49 @@ def test_zone_xwoba_excludes_non_batted_ball_descriptions():
     result = compute_zone_xwoba_rates(df, w)
     # Only the 15 batted balls count; result should reflect xwoba=0.80
     assert result["5"] == pytest.approx(0.80)
+
+
+# ---------------------------------------------------------------------------
+# compute_zone_hard_hit_rates
+# ---------------------------------------------------------------------------
+
+def test_zone_hard_hit_omits_thin_zone():
+    from src.hitters.profiles import compute_zone_hard_hit_rates
+    # zone 1: 3 batted balls (thin) — should be omitted
+    # zone 5: 15 batted balls — should be present
+    df, w = _make_batted_ball_df({1: 3, 5: 15})
+    result = compute_zone_hard_hit_rates(df, w)
+    assert "1" not in result
+    assert "5" in result
+    assert result["5"] == pytest.approx(1.0)  # _make_batted_ball_df uses launch_speed=98 (>=95)
+
+
+def test_zone_hard_hit_rate_calculation():
+    from src.hitters.profiles import compute_zone_hard_hit_rates
+    # zone 5: 10 hard-hit (>=95) + 5 soft-hit (<95) → rate = 10/15
+    rows = (
+        [{"description": "hit_into_play", "zone": 5.0,
+          "launch_speed": 98.0,
+          "game_date": pd.Timestamp("2024-06-01")}] * 10
+        + [{"description": "hit_into_play", "zone": 5.0,
+            "launch_speed": 85.0,
+            "game_date": pd.Timestamp("2024-06-01")}] * 5
+    )
+    df = pd.DataFrame(rows)
+    w = np.ones(len(df))
+    result = compute_zone_hard_hit_rates(df, w)
+    assert result["5"] == pytest.approx(10 / 15)
+
+
+def test_zone_hard_hit_excludes_non_batted_balls():
+    from src.hitters.profiles import compute_zone_hard_hit_rates
+    rows = (
+        [{"description": "hit_into_play", "zone": 5.0,
+          "launch_speed": 98.0, "game_date": pd.Timestamp("2024-06-01")}] * 15
+        + [{"description": "swinging_strike", "zone": 5.0,
+            "launch_speed": None, "game_date": pd.Timestamp("2024-06-01")}] * 50
+    )
+    df = pd.DataFrame(rows)
+    w = np.ones(len(df))
+    result = compute_zone_hard_hit_rates(df, w)
+    assert result["5"] == pytest.approx(1.0)  # only the 15 batted balls, all hard-hit
