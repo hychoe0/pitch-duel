@@ -209,3 +209,39 @@ def test_zone_hard_hit_excludes_non_batted_balls():
     w = np.ones(len(df))
     result = compute_zone_hard_hit_rates(df, w)
     assert result["5"] == pytest.approx(1.0)  # only the 15 batted balls, all hard-hit
+
+
+# ---------------------------------------------------------------------------
+# Integration: Judge zone xwOBA validation (requires --rebuild-demo to have run)
+# ---------------------------------------------------------------------------
+
+_JUDGE_PROFILE_PATH = Path("data/processed/profiles/592450.json")
+
+
+@pytest.mark.skipif(
+    not _JUDGE_PROFILE_PATH.exists(),
+    reason="Run 'python -m src.hitters.profiles --rebuild-demo' first",
+)
+def test_judge_zone_xwoba_heart_of_plate_above_threshold():
+    from src.hitters.profiles import load_profile
+    profile = load_profile(592450)
+    assert "5" in profile.zone_xwoba_rates, (
+        "Zone 5 (heart of plate) should have enough batted balls for Judge"
+    )
+    assert profile.zone_xwoba_rates["5"] > 0.40, (
+        f"Expected xwOBA > 0.40 in zone 5 for Judge, got {profile.zone_xwoba_rates['5']:.3f}"
+    )
+
+
+@pytest.mark.skipif(
+    not _JUDGE_PROFILE_PATH.exists(),
+    reason="Run 'python -m src.hitters.profiles --rebuild-demo' first",
+)
+def test_judge_zone_xwoba_chase_lower_than_heart():
+    from src.hitters.profiles import load_profile
+    profile = load_profile(592450)
+    if "14" not in profile.zone_xwoba_rates:
+        pytest.skip("Zone 14 below MIN_ZONE_BATTED_BALLS threshold for Judge — skip comparison")
+    assert profile.zone_xwoba_rates["14"] < profile.zone_xwoba_rates["5"], (
+        "Chase zone (14) xwOBA should be lower than heart-of-plate (5) for Judge"
+    )
