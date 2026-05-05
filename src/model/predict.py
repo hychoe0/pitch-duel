@@ -376,7 +376,9 @@ def _resolve_hitter_profile(
                   and fallback_to_mlb=True, falls back to the MLB profile dir.
     Falls back to league-average profile if still not found.
 
-    Returns (feature_dict, is_thin_sample, used_fallback).
+    Returns (feature_dict, is_thin_sample, used_fallback, profile).
+    The profile object is the 4th element so callers can call
+    resolve_hitter_features_for_pitch() with per-pitch context (zone, count, pitch_type).
     """
     import json as _json
 
@@ -407,7 +409,7 @@ def _resolve_hitter_profile(
         for d in search_dirs:
             try:
                 profile = load_profile(pid, d)
-                return profile_to_feature_dict(profile), profile.is_thin_sample, False
+                return profile_to_feature_dict(profile), profile.is_thin_sample, False, profile
             except FileNotFoundError:
                 continue
 
@@ -419,7 +421,7 @@ def _resolve_hitter_profile(
                     data = _json.load(f)
                 if data.get("player_name", "").lower() == hitter_name.lower():
                     profile = load_profile(data["player_id"], d)
-                    return profile_to_feature_dict(profile), profile.is_thin_sample, False
+                    return profile_to_feature_dict(profile), profile.is_thin_sample, False, profile
             except Exception:
                 continue
 
@@ -428,7 +430,7 @@ def _resolve_hitter_profile(
         stacklevel=3,
     )
     avg_profile = get_league_average_profile()
-    return profile_to_feature_dict(avg_profile), True, True
+    return profile_to_feature_dict(avg_profile), True, True, avg_profile
 
 
 # ---------------------------------------------------------------------------
@@ -536,11 +538,51 @@ def predict_pitch(
     hc_model, hc_cal = hc_pair
     xwoba_model, xwoba_cal = xwoba_pair
 
-    hitter_features, is_thin, used_fallback = _resolve_hitter_profile(
+    hitter_features, is_thin, used_fallback, profile = _resolve_hitter_profile(
         hitter_name, league=league, fallback_to_mlb=fallback_to_mlb
     )
     contextual_features = _resolve_contextual_hitter_features(pitch, hitter_features)
-    combined_features = {**hitter_features, **contextual_features}
+
+    # Per-pitch context features (7 new HITTER_CONTEXT_FEATURES).
+    # Derive zone from plate coordinates so callers don't need to pass it explicitly.
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    _zone = _plate_to_statcast_zone(
+        float(pitch.get("plate_x", 0)),
+        float(pitch.get("plate_z", 2.5)),
+    )
+    new_context = resolve_hitter_features_for_pitch(
+        profile=profile,
+        zone=_zone,
+        balls=int(pitch.get("balls", 0)),
+        strikes=int(pitch.get("strikes", 0)),
+        pitch_type=pitch.get("pitch_type", "FF"),
+    )
+
+    # Hitter-calibrated physics scores — features 88 and 89 (ignored by current model,
+    # active after Prompt 4 retrain). Uses module-level _index_cache for speed.
+    from src.model.stuff_vs_hitter import (
+        PHYSICS_FEATURES as _PHYSICS_FEATURES,
+        compute_stuff_vs_hitter,
+        STANDARDIZATION_PATH as _STD_PATH,
+    )
+    _spin  = float(pitch.get("release_spin_rate") or 0)
+    _speed = float(pitch.get("release_speed") or 1)
+    _pitch_physics = {k: float(pitch.get(k, 0.0)) for k in _PHYSICS_FEATURES}
+    _pitch_physics["spin_to_velo_ratio"] = _spin / _speed if _speed else 0.0
+    stuff_features = compute_stuff_vs_hitter(
+        pitch_physics=_pitch_physics,
+        player_id=int(profile.player_id),
+        pitch_type=pitch.get("pitch_type", "FF"),
+        standardization_path=_STD_PATH,
+    )
+
+    combined_features = {
+        **hitter_features,
+        **contextual_features,
+        **new_context,
+        "stuff_vs_hitter_xwoba": stuff_features["stuff_vs_hitter_xwoba"],
+        "stuff_vs_hitter_whiff": stuff_features["stuff_vs_hitter_whiff"],
+    }
     row = build_feature_row(pitch, combined_features, feature_cols, encodings)
 
     def _calibrated(model, cal, row):
@@ -582,6 +624,10 @@ def predict_pitch(
         predicted_xwoba_per_pitch = float(np.clip(raw_xwoba, 0.0, 2.0))
         context_xwoba             = _xwoba_context(predicted_xwoba_per_pitch)
 
+    # PVHI — derived hitter-specific danger index (no model retrain needed)
+    from src.model.pvhi import compute_pvhi, interpret_pvhi
+    pvhi_result = compute_pvhi(pitch, profile, stuff_features, new_context)
+
     return {
         "p_swing":               round(p_swing, 4),
         "p_contact_given_swing": round(p_contact_given_sw, 4),
@@ -601,6 +647,15 @@ def predict_pitch(
         ),
         "predicted_xwoba_on_contact": None,  # LEGACY — see field semantics note above
         "xwoba_context":         context_xwoba,
+        "stuff_vs_hitter_xwoba":  round(stuff_features["stuff_vs_hitter_xwoba"], 4),
+        "stuff_vs_hitter_whiff":  round(stuff_features["stuff_vs_hitter_whiff"], 4),
+        "stuff_n_neighbors":      stuff_features["n_neighbors_found"],
+        "stuff_similarity":       round(stuff_features["similarity_quality"], 3),
+        "pvhi":                  pvhi_result["pvhi"],
+        "pvhi_stuff":            pvhi_result["pvhi_stuff"],
+        "pvhi_location":         pvhi_result["pvhi_location"],
+        "pvhi_count":            pvhi_result["pvhi_count"],
+        "pvhi_interpretation":   interpret_pvhi(pvhi_result["pvhi"]),
     }
 
 

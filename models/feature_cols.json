@@ -78,5 +78,14 @@
   "hitter_whiff_rate_this_zone",
   "hitter_swing_rate_this_family",
   "hitter_whiff_rate_this_family",
-  "hitter_swing_rate_this_count"
+  "hitter_swing_rate_this_count",
+  "hitter_zone_swing_rate",
+  "hitter_zone_whiff_rate",
+  "hitter_zone_xwoba",
+  "hitter_zone_hard_hit_rate",
+  "hitter_contact_rate_this_pitch",
+  "hitter_family_swing_rate",
+  "hitter_family_whiff_rate",
+  "stuff_vs_hitter_xwoba",
+  "stuff_vs_hitter_whiff"
 ]

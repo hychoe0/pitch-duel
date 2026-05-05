@@ -113,6 +113,149 @@ def test_resolver_returns_all_five_global_rates():
         assert key in result
 
 
+def test_resolver_returns_exactly_13_keys():
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile()
+    result = resolve_hitter_features_for_pitch(
+        profile, zone=5, balls=1, strikes=2, pitch_type="FF"
+    )
+    assert len(result) == 13, f"Expected 13 keys, got {len(result)}: {sorted(result)}"
+    expected_keys = {
+        "hitter_swing_rate", "hitter_chase_rate", "hitter_contact_rate",
+        "hitter_hard_hit_rate", "hitter_whiff_rate",
+        "hitter_swing_rate_this_count",
+        "hitter_zone_swing_rate", "hitter_zone_whiff_rate",
+        "hitter_zone_xwoba", "hitter_zone_hard_hit_rate",
+        "hitter_contact_rate_this_pitch",
+        "hitter_family_swing_rate", "hitter_family_whiff_rate",
+    }
+    assert set(result) == expected_keys
+
+
+def test_resolver_count_fallback_invalid_count():
+    """balls=9, strikes=9 is not a real count — must return profile.swing_rate, no KeyError."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(swing_rate=0.42)
+    result = resolve_hitter_features_for_pitch(
+        profile, zone=5, balls=9, strikes=9, pitch_type="FF"
+    )
+    assert result["hitter_swing_rate_this_count"] == pytest.approx(0.42)
+
+
+def test_resolver_count_uses_profile_data_when_available():
+    """Valid count key from swing_rate_by_count takes priority over global rate."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(
+        swing_rate=0.42,
+        swing_rate_by_count={"0-0": 0.325},
+    )
+    result = resolve_hitter_features_for_pitch(
+        profile, zone=5, balls=0, strikes=0, pitch_type="FF"
+    )
+    assert result["hitter_swing_rate_this_count"] == pytest.approx(0.325)
+
+
+def test_resolver_zone_fallback_invalid_zone():
+    """zone=99 is invalid — all zone features return their defined fallbacks, no exception."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch, LEAGUE_AVG
+    profile = _minimal_profile(swing_rate=0.42, whiff_rate=0.28, hard_hit_rate=0.50)
+    result = resolve_hitter_features_for_pitch(
+        profile, zone=99, balls=0, strikes=0, pitch_type="FF"
+    )
+    assert result["hitter_zone_swing_rate"]    == pytest.approx(0.42)   # falls back to profile.swing_rate
+    assert result["hitter_zone_whiff_rate"]    == pytest.approx(0.28)   # falls back to profile.whiff_rate
+    assert result["hitter_zone_xwoba"]         == pytest.approx(LEAGUE_AVG["zone_xwoba"])
+    assert result["hitter_zone_hard_hit_rate"] == pytest.approx(0.50)   # falls back to profile.hard_hit_rate
+
+
+def test_resolver_zone_uses_str_keys():
+    """Profile zone dicts stored with str keys (JSON round-trip) work correctly."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(
+        zone_swing_rates={"5": 0.61},   # str keys as loaded from JSON
+        zone_whiff_rates={"5": 0.33},
+    )
+    result = resolve_hitter_features_for_pitch(profile, zone=5)
+    assert result["hitter_zone_swing_rate"] == pytest.approx(0.61)
+    assert result["hitter_zone_whiff_rate"] == pytest.approx(0.33)
+
+
+def test_resolver_zone_uses_int_keys():
+    """Profile zone dicts stored with int keys (fresh build) work correctly."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(
+        zone_swing_rates={5: 0.61},   # int keys as built in-memory
+        zone_whiff_rates={5: 0.33},
+    )
+    result = resolve_hitter_features_for_pitch(profile, zone=5)
+    assert result["hitter_zone_swing_rate"] == pytest.approx(0.61)
+    assert result["hitter_zone_whiff_rate"] == pytest.approx(0.33)
+
+
+def test_resolver_pitch_type_fallback_unknown():
+    """pitch_type='XX' is unknown — contact_rate_this_pitch falls back to profile.contact_rate."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(
+        contact_rate=0.78,
+        swing_rate=0.42,
+        whiff_rate=0.28,
+    )
+    result = resolve_hitter_features_for_pitch(
+        profile, zone=5, balls=0, strikes=0, pitch_type="XX"
+    )
+    assert result["hitter_contact_rate_this_pitch"] == pytest.approx(0.78)
+    # Unknown pitch_type maps to "other" family — falls back to global rates
+    assert result["hitter_family_swing_rate"] == pytest.approx(0.42)
+    assert result["hitter_family_whiff_rate"] == pytest.approx(0.28)
+
+
+def test_resolver_pitch_type_uses_profile_data():
+    """Known pitch_type with profile data uses the specific rate."""
+    from src.hitters.profiles import resolve_hitter_features_for_pitch
+    profile = _minimal_profile(
+        contact_rate=0.78,
+        contact_rate_by_pitch_type={"SL": 0.62},
+        family_swing_rates={"breaking": 0.51},
+        family_whiff_rates={"breaking": 0.38},
+    )
+    result = resolve_hitter_features_for_pitch(
+        profile, zone=5, balls=1, strikes=2, pitch_type="SL"
+    )
+    assert result["hitter_contact_rate_this_pitch"] == pytest.approx(0.62)
+    assert result["hitter_family_swing_rate"]       == pytest.approx(0.51)
+    assert result["hitter_family_whiff_rate"]       == pytest.approx(0.38)
+
+
+# ---------------------------------------------------------------------------
+# PITCH_FAMILY_MAP coverage
+# ---------------------------------------------------------------------------
+
+def test_pitch_family_map_ff_is_fastball():
+    from src.hitters.profiles import PITCH_FAMILY_MAP
+    assert PITCH_FAMILY_MAP["FF"] == "fastball"
+    assert PITCH_FAMILY_MAP["SI"] == "fastball"
+    assert PITCH_FAMILY_MAP["FC"] == "fastball"
+
+
+def test_pitch_family_map_sl_is_breaking():
+    from src.hitters.profiles import PITCH_FAMILY_MAP
+    assert PITCH_FAMILY_MAP["SL"] == "breaking"
+    assert PITCH_FAMILY_MAP["ST"] == "breaking"
+    assert PITCH_FAMILY_MAP["CU"] == "breaking"
+
+
+def test_pitch_family_map_ch_is_offspeed():
+    from src.hitters.profiles import PITCH_FAMILY_MAP
+    assert PITCH_FAMILY_MAP["CH"] == "offspeed"
+    assert PITCH_FAMILY_MAP["FS"] == "offspeed"
+    assert PITCH_FAMILY_MAP["FO"] == "offspeed"
+
+
+def test_pitch_family_map_unknown_returns_other_via_get():
+    from src.hitters.profiles import PITCH_FAMILY_MAP
+    assert PITCH_FAMILY_MAP.get("XX", "other") == "other"
+
+
 # ---------------------------------------------------------------------------
 # compute_zone_xwoba_rates
 # ---------------------------------------------------------------------------

@@ -24,14 +24,20 @@ MIN_WEIGHTED_PA = 200  # weighted plate appearances; below this, blend with leag
 ZONE_X_MIN, ZONE_X_MAX = -0.85, 0.85  # feet from center of plate
 ZONE_Z_MIN, ZONE_Z_MAX = 1.5, 3.5     # feet from ground
 
+LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH = 0.075
+# MLB-wide mean xwOBA across ALL pitches (2023-2024).
+# Most pitches are 0.0 (whiffs, balls, called strikes); only batted balls contribute.
+# Used as fallback denominator for thin-sample hitters in PVHI.
+
 # League-average fallback values (2015-2022 MLB)
 LEAGUE_AVG = {
-    "swing_rate":    0.47,
-    "chase_rate":    0.30,
-    "contact_rate":  0.78,
-    "hard_hit_rate": 0.38,
-    "whiff_rate":    0.25,
-    "zone_xwoba":    0.380,  # MLB avg xwOBA on batted balls (pitch-clock era)
+    "swing_rate":              0.47,
+    "chase_rate":              0.30,
+    "contact_rate":            0.78,
+    "hard_hit_rate":           0.38,
+    "whiff_rate":              0.25,
+    "zone_xwoba":              0.380,  # MLB avg xwOBA on batted balls (pitch-clock era)
+    "overall_xwoba_per_pitch": 0.075,  # MLB avg xwOBA across all pitch types
 }
 
 # Recency weights for hitter profiles — aggressive toward pitch-clock era
@@ -64,12 +70,32 @@ ALL_ZONES    = STRIKE_ZONES + BALL_ZONES
 #   13 (low-inside)  | 14 (low-outside)
 
 PITCH_FAMILIES = {
-    "fastball": ["FF", "SI", "FC"],
-    "breaking": ["SL", "CU", "KC", "SV", "CS"],
+    "fastball": ["FF", "SI", "FC", "FA"],
+    "breaking": ["SL", "ST", "CU", "KC", "CS", "SV", "SC"],
     "offspeed": ["CH", "FS", "FO"],
-    "other":    ["KN", "EP", "SC"],
+    "other":    ["KN", "EP"],
 }
 PITCH_FAMILY_LIST = ["fastball", "breaking", "offspeed", "other"]
+
+# Reverse lookup: pitch_type -> family name. "other" for any unrecognized type.
+PITCH_FAMILY_MAP: dict[str, str] = {
+    pt: family
+    for family, types in PITCH_FAMILIES.items()
+    for pt in types
+}
+
+# League-average defaults for the 8 new per-pitch context features.
+# Used as fill values for unknown batters and as fallbacks in add_hitter_context_features.
+LEAGUE_AVG_DEFAULTS: dict[str, float] = {
+    "hitter_swing_rate_this_count":   0.47,
+    "hitter_zone_swing_rate":         0.50,
+    "hitter_zone_whiff_rate":         0.25,
+    "hitter_zone_xwoba":              0.380,
+    "hitter_zone_hard_hit_rate":      0.38,
+    "hitter_contact_rate_this_pitch": 0.78,
+    "hitter_family_swing_rate":       0.47,
+    "hitter_family_whiff_rate":       0.25,
+}
 
 MIN_ZONE_PITCHES   = 20   # weighted pitches per zone before fallback
 MIN_FAMILY_PITCHES = 30   # weighted pitches per pitch family before fallback
@@ -146,6 +172,7 @@ class HitterProfile:
     zone_hard_hit_rates: dict = field(default_factory=dict)        # str(zone_id) -> float
     family_swing_rates: dict = field(default_factory=dict)         # family_str -> float
     family_whiff_rates: dict = field(default_factory=dict)         # family_str -> float
+    overall_xwoba_per_pitch: float = 0.0  # mean per-pitch xwOBA (denominator for PVHI)
     sample_size: int = 0
     is_thin_sample: bool = False
     league: str = "MLB"  # "MLB" or "AAA"; default keeps old saved profiles loading correctly
@@ -377,6 +404,36 @@ def compute_zone_hard_hit_rates(df: pd.DataFrame, w: np.ndarray) -> dict:
     return result
 
 
+_HIT_INTO_PLAY_DESCRIPTIONS = {
+    "hit_into_play",
+    "hit_into_play_no_out",
+    "hit_into_play_score",
+}
+
+
+def compute_overall_xwoba_per_pitch(df: pd.DataFrame, w: np.ndarray) -> float:
+    """
+    Weighted mean per-pitch xwOBA across ALL pitches (0.0 for non-contact outcomes).
+    Returns LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH if weighted sample is thin (< 100).
+    """
+    if len(df) == 0 or w.sum() < 100:
+        return LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH
+    is_contact = df["description"].isin(_HIT_INTO_PLAY_DESCRIPTIONS)
+    xwoba_vals = np.where(
+        is_contact & df["estimated_woba_using_speedangle"].notna(),
+        df["estimated_woba_using_speedangle"].fillna(0.0).values,
+        0.0,
+    )
+    return float(np.average(xwoba_vals, weights=w))
+
+
+def get_overall_xwoba_per_pitch(profile: "HitterProfile") -> float:
+    """Returns profile value, or league avg if 0.0/missing (backward compat)."""
+    if profile.overall_xwoba_per_pitch <= 0.0:
+        return LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH
+    return profile.overall_xwoba_per_pitch
+
+
 def compute_contact_rate_by_pitch_type(df: pd.DataFrame, w: np.ndarray) -> dict:
     # Pre-2023 Statcast labeled sweepers as "SV"; 2023+ uses "ST".
     # Merge pre-2023 SV rows into the ST bucket so the sweeper feature
@@ -538,6 +595,7 @@ def build_profile(
         zone_hard_hit_rates=compute_zone_hard_hit_rates(sub, w) if n > 0 else {},
         family_swing_rates=compute_family_swing_rates(sub, w, swing_rate) if n > 0 else {f: swing_rate for f in PITCH_FAMILY_LIST},
         family_whiff_rates=compute_family_whiff_rates(sub, w, whiff_rate) if n > 0 else {f: whiff_rate for f in PITCH_FAMILY_LIST},
+        overall_xwoba_per_pitch=compute_overall_xwoba_per_pitch(sub, w) if n > 0 else LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH,
         sample_size=n,
         is_thin_sample=is_thin,
     )
@@ -595,24 +653,60 @@ def profile_to_feature_dict(profile: HitterProfile) -> dict:
 def resolve_hitter_features_for_pitch(
     profile: "HitterProfile",
     zone: int,
+    balls: int = 0,
+    strikes: int = 0,
+    pitch_type: str = "FF",
 ) -> dict:
     """
-    Returns the 5 global rate features plus zone-specific damage rates.
-    Falls back to LEAGUE_AVG["zone_xwoba"] for xwOBA (no hitter-global stored),
-    and to profile.hard_hit_rate for zone hard-hit rate (better prior than league avg).
+    Returns 13 features: 5 global hitter rates + 8 per-pitch context features.
+
+    Zone dict keys may be int (fresh profile) or str (JSON-loaded) — both handled.
+    Fallback rules:
+      hitter_swing_rate_this_count:   profile.swing_rate if count key missing
+      hitter_zone_swing_rate:         profile.swing_rate if zone key missing
+      hitter_zone_whiff_rate:         profile.whiff_rate if zone key missing
+      hitter_zone_xwoba:              LEAGUE_AVG["zone_xwoba"] (0.380) — no hitter-global stored
+      hitter_zone_hard_hit_rate:      profile.hard_hit_rate — own global is the right prior
+      hitter_contact_rate_this_pitch: profile.contact_rate if pitch_type key missing
+      hitter_family_swing_rate:       profile.swing_rate if family key missing
+      hitter_family_whiff_rate:       profile.whiff_rate if family key missing
     """
+    zone_s = str(zone)
+    count_key = f"{balls}-{strikes}"
+    family = PITCH_FAMILY_MAP.get(pitch_type, "other")
+
+    # Zone dicts use int keys when built fresh, str keys after JSON round-trip.
+    def _zone_rate(d: dict, fallback: float) -> float:
+        return d.get(zone_s, d.get(zone, fallback))
+
     return {
+        # 5 global rates — unchanged
         "hitter_swing_rate":          profile.swing_rate,
         "hitter_chase_rate":          profile.chase_rate,
         "hitter_contact_rate":        profile.contact_rate,
         "hitter_hard_hit_rate":       profile.hard_hit_rate,
         "hitter_whiff_rate":          profile.whiff_rate,
-        "hitter_zone_xwoba":          profile.zone_xwoba_rates.get(
-                                          str(zone), LEAGUE_AVG["zone_xwoba"]
-                                      ),
-        "hitter_zone_hard_hit_rate":  profile.zone_hard_hit_rates.get(
-                                          str(zone), profile.hard_hit_rate
-                                      ),
+        # 8 per-pitch context features
+        "hitter_swing_rate_this_count":   profile.swing_rate_by_count.get(
+                                              count_key, profile.swing_rate
+                                          ),
+        "hitter_zone_swing_rate":         _zone_rate(profile.zone_swing_rates, profile.swing_rate),
+        "hitter_zone_whiff_rate":         _zone_rate(profile.zone_whiff_rates, profile.whiff_rate),
+        "hitter_zone_xwoba":              profile.zone_xwoba_rates.get(
+                                              zone_s, LEAGUE_AVG["zone_xwoba"]
+                                          ),
+        "hitter_zone_hard_hit_rate":      profile.zone_hard_hit_rates.get(
+                                              zone_s, profile.hard_hit_rate
+                                          ),
+        "hitter_contact_rate_this_pitch": profile.contact_rate_by_pitch_type.get(
+                                              pitch_type, profile.contact_rate
+                                          ),
+        "hitter_family_swing_rate":       profile.family_swing_rates.get(
+                                              family, profile.swing_rate
+                                          ),
+        "hitter_family_whiff_rate":       profile.family_whiff_rates.get(
+                                              family, profile.whiff_rate
+                                          ),
     }
 
 
@@ -648,11 +742,13 @@ def load_profile(player_id: int, profile_dir: Path = PROFILE_DIR) -> HitterProfi
 
 
 def get_league_average_profile() -> HitterProfile:
+    _profile_fields = {k: v for k, v in LEAGUE_AVG.items()
+                       if k in {"swing_rate", "chase_rate", "contact_rate", "hard_hit_rate", "whiff_rate"}}
     return HitterProfile(
         player_id=-1,
         player_name="League Average",
         stand="R",
-        **LEAGUE_AVG,
+        **_profile_fields,
         zone_swing_rates={z: LEAGUE_AVG["swing_rate"] for z in ALL_ZONES},
         zone_whiff_rates={z: LEAGUE_AVG["whiff_rate"] for z in ALL_ZONES},
         family_swing_rates={f: LEAGUE_AVG["swing_rate"] for f in PITCH_FAMILY_LIST},
@@ -734,6 +830,86 @@ def merge_profiles_into_df(
 
     print(f"Profile features merged. Shape: {merged.shape}")
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Per-row hitter context feature resolution (training time)
+# ---------------------------------------------------------------------------
+
+def add_hitter_context_features(
+    df: pd.DataFrame,
+    profiles: dict | None = None,
+    profile_dir: Path = PROFILE_DIR,
+) -> pd.DataFrame:
+    """
+    Add 7 new per-pitch context feature columns to df.
+
+    Operates vectorized per batter (groupby batter, map over each group).
+    Rows with no matching profile receive LEAGUE_AVG_DEFAULTS values.
+
+    Columns added:
+      hitter_zone_swing_rate, hitter_zone_whiff_rate,
+      hitter_zone_xwoba, hitter_zone_hard_hit_rate,
+      hitter_contact_rate_this_pitch,
+      hitter_family_swing_rate, hitter_family_whiff_rate
+
+    Note: hitter_swing_rate_this_count is handled by add_contextual_hitter_features
+    in preprocess.py (HITTER_CONTEXTUAL_FEATURES) to avoid a duplicate ALL_FEATURES entry.
+    """
+    if profiles is None:
+        profiles = {}
+        for path in profile_dir.glob("*.json"):
+            try:
+                pid = int(path.stem)
+                profiles[pid] = load_profile(pid, profile_dir)
+            except Exception:
+                pass
+
+    new_cols = [
+        "hitter_zone_swing_rate",
+        "hitter_zone_whiff_rate",
+        "hitter_zone_xwoba",
+        "hitter_zone_hard_hit_rate",
+        "hitter_contact_rate_this_pitch",
+        "hitter_family_swing_rate",
+        "hitter_family_whiff_rate",
+    ]
+    # Initialize all rows with league-average defaults
+    for col in new_cols:
+        df[col] = LEAGUE_AVG_DEFAULTS[col]
+
+    n_hitters = 0
+    for batter_id, batter_df in df.groupby("batter"):
+        profile = profiles.get(int(batter_id))
+        if profile is None:
+            continue
+
+        idx = batter_df.index
+        n_hitters += 1
+
+        # Zone features — normalize dict keys to str to handle JSON-loaded profiles
+        zone_col = batter_df["zone"].fillna(-1).astype(int).astype(str)
+        swing_z  = {str(k): v for k, v in profile.zone_swing_rates.items()}
+        whiff_z  = {str(k): v for k, v in profile.zone_whiff_rates.items()}
+        df.loc[idx, "hitter_zone_swing_rate"]    = zone_col.map(swing_z).fillna(profile.swing_rate)
+        df.loc[idx, "hitter_zone_whiff_rate"]    = zone_col.map(whiff_z).fillna(profile.whiff_rate)
+        df.loc[idx, "hitter_zone_xwoba"]         = zone_col.map(profile.zone_xwoba_rates).fillna(LEAGUE_AVG["zone_xwoba"])
+        df.loc[idx, "hitter_zone_hard_hit_rate"] = zone_col.map(profile.zone_hard_hit_rates).fillna(profile.hard_hit_rate)
+
+        # Per-pitch-type contact rate (contact_rate_by_pitch_type keys are str)
+        df.loc[idx, "hitter_contact_rate_this_pitch"] = (
+            batter_df["pitch_type"]
+            .map(profile.contact_rate_by_pitch_type)
+            .fillna(profile.contact_rate)
+        )
+
+        # Pitch family rates (family_swing/whiff_rates keys are str family names)
+        family_col = batter_df["pitch_type"].map(PITCH_FAMILY_MAP).fillna("other")
+        df.loc[idx, "hitter_family_swing_rate"] = family_col.map(profile.family_swing_rates).fillna(profile.swing_rate)
+        df.loc[idx, "hitter_family_whiff_rate"] = family_col.map(profile.family_whiff_rates).fillna(profile.whiff_rate)
+
+    print(f"add_hitter_context_features: resolved for {n_hitters:,} hitters, {len(df):,} rows")
+    return df
 
 
 # ---------------------------------------------------------------------------

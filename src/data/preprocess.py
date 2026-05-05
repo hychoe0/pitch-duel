@@ -173,6 +173,34 @@ HITTER_CONTEXTUAL_FEATURES = [
     "hitter_swing_rate_this_count",
 ]
 
+# Per-pitch context features resolved directly from profile dicts (not expanded static columns).
+# These are distinct from HITTER_CONTEXTUAL_FEATURES above:
+#   - zone_xwoba / zone_hard_hit_rate: damage quality signals not in the old group
+#   - contact_rate_this_pitch: single pitch_type lookup (vs 11-column expansion)
+#   - zone/family swing/whiff: same semantic content, different computation path
+# hitter_swing_rate_this_count is intentionally omitted here — it already appears in
+# HITTER_CONTEXTUAL_FEATURES; duplicating it in ALL_FEATURES would create duplicate
+# DataFrame columns at training time.
+HITTER_CONTEXT_FEATURES = [
+    "hitter_zone_swing_rate",
+    "hitter_zone_whiff_rate",
+    "hitter_zone_xwoba",
+    "hitter_zone_hard_hit_rate",
+    "hitter_contact_rate_this_pitch",
+    "hitter_family_swing_rate",
+    "hitter_family_whiff_rate",
+]
+
+# Hitter-calibrated pitch physics scores (KNN similarity over historical swings).
+# Appended last so existing feature indices are unchanged during incremental retrains.
+STUFF_VS_HITTER_FEATURES = [
+    "stuff_vs_hitter_xwoba",
+    "stuff_vs_hitter_whiff",
+]
+
+# ALL_FEATURES: 80 (baseline) + 7 (HITTER_CONTEXT_FEATURES) + 2 (STUFF_VS_HITTER) = 89 total.
+# The model currently trained on 80 features uses feature_cols.json to select
+# its subset — adding new columns here does not break inference until retrain.
 ALL_FEATURES = (
     PITCH_FEATURES
     + CONTEXT_FEATURES
@@ -181,6 +209,8 @@ ALL_FEATURES = (
     + HITTER_ZONE_FEATURES
     + HITTER_FAMILY_FEATURES
     + HITTER_CONTEXTUAL_FEATURES
+    + HITTER_CONTEXT_FEATURES
+    + STUFF_VS_HITTER_FEATURES
     # PITCHER_FEATURES intentionally excluded — disconnected from model pipeline.
     # Keep src/pitchers/features.py and the parquet file; re-add here to re-enable.
     # + PITCHER_FEATURES
@@ -694,12 +724,21 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
 
     # Hitter identity features — build/merge all hitter profiles from pre-cutoff data
     print("Building and merging hitter profiles...")
-    from src.hitters.profiles import merge_profiles_into_df
+    from src.hitters.profiles import merge_profiles_into_df, add_hitter_context_features
     df = merge_profiles_into_df(df)
 
     # Contextual matched features: resolve zone/family/count for each pitch row
     print("Resolving contextual hitter features...")
     df = add_contextual_hitter_features(df)
+
+    # Per-pitch context features from profile dicts (7 new HITTER_CONTEXT_FEATURES)
+    print("Resolving per-pitch hitter context features...")
+    df = add_hitter_context_features(df)
+
+    # Hitter-calibrated physics scores (KNN over historical swings)
+    print("Computing stuff_vs_hitter features...")
+    from src.model.stuff_vs_hitter import add_stuff_vs_hitter_features
+    df = add_stuff_vs_hitter_features(df)
 
     train, test = split_data(df)
     save_processed(df, train, test)
@@ -711,7 +750,70 @@ def run_preprocessing(raw_df: pd.DataFrame) -> tuple:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from src.data.fetch import load_raw
+    import argparse
+    import time
 
-    raw = load_raw()
-    run_preprocessing(raw)
+    parser = argparse.ArgumentParser(description="Preprocess Statcast data")
+    parser.add_argument(
+        "--demo-only",
+        action="store_true",
+        help=(
+            "Filter to DEMO_HITTERS before add_hitter_context_features, "
+            "save to data/processed/statcast_demo_context.parquet. "
+            "Does NOT overwrite statcast_processed.parquet."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.demo_only:
+        import pandas as pd
+        from src.hitters.profiles import DEMO_HITTERS, add_hitter_context_features
+
+        t0 = time.time()
+        print("Loading full processed parquet...")
+        df = pd.read_parquet("data/processed/statcast_processed.parquet")
+
+        demo_ids = set(DEMO_HITTERS.values())
+        demo_df = df[df["batter"].isin(demo_ids)].copy().reset_index(drop=True)
+        print(f"Demo subset: {len(demo_df):,} rows for {len(demo_ids)} hitters")
+
+        print("Resolving per-pitch hitter context features...")
+        demo_df = add_hitter_context_features(demo_df)
+
+        print("Computing stuff_vs_hitter features...")
+        from src.model.stuff_vs_hitter import add_stuff_vs_hitter_features
+        demo_df = add_stuff_vs_hitter_features(demo_df)
+
+        out_path = "data/processed/statcast_demo_context.parquet"
+        demo_df.to_parquet(out_path, index=False)
+        elapsed = time.time() - t0
+        print(f"\nSaved {out_path}  ({elapsed:.1f}s)")
+
+        # NaN check across all new feature columns
+        new_cols = [
+            "hitter_zone_swing_rate", "hitter_zone_whiff_rate",
+            "hitter_zone_xwoba", "hitter_zone_hard_hit_rate",
+            "hitter_contact_rate_this_pitch",
+            "hitter_family_swing_rate", "hitter_family_whiff_rate",
+            "stuff_vs_hitter_xwoba", "stuff_vs_hitter_whiff",
+        ]
+        nan_counts = demo_df[new_cols].isna().sum()
+        if nan_counts.any():
+            print(f"\nWARN: NaN counts in new columns:\n{nan_counts[nan_counts > 0]}")
+        else:
+            print(f"\nNo NaN values in any of the {len(new_cols)} new feature columns.")
+
+        print("\nPer-hitter mean of new context + stuff features:")
+        name_map = {v: k for k, v in DEMO_HITTERS.items()}
+        summary = (
+            demo_df.groupby("batter")[new_cols]
+            .mean()
+            .rename(index=name_map)
+        )
+        print(summary.to_string(float_format="{:.3f}".format))
+        print(f"\nElapsed: {elapsed:.1f}s")
+    else:
+        from src.data.fetch import load_raw
+
+        raw = load_raw()
+        run_preprocessing(raw)

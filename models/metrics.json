@@ -1,8 +1,8 @@
 {
-  "swing_auc": 0.8747,
+  "swing_auc": 0.8745,
   "swing_rate": 0.4716,
-  "contact_auc": 0.7923,
+  "contact_auc": 0.7876,
   "contact_rate": 0.7721,
-  "hard_contact_auc": 0.7201,
+  "hard_contact_auc": 0.7184,
   "hard_contact_rate": 0.3661
 }

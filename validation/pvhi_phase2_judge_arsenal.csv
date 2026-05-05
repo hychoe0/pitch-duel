@@ -1,0 +1,6 @@
+pitch_spec,pvhi,pvhi_stuff,pvhi_location,pvhi_count,interpretation
+e_CU_zone5_31,220.93,244.13,250.0,109.06,high_danger
+a_FF_zone1_12,205.51,127.71,250.0,119.29,high_danger
+b_FF_zone5_00,202.43,163.36,250.0,77.15,high_danger
+d_CH_zone13_12,73.67,42.53,66.82,119.29,safer_than_average
+c_SL_zone14_12,49.59,89.97,18.83,119.29,very_safe

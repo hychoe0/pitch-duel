@@ -123,6 +123,8 @@ AAA validation hitters (Task 2):
 | ~~Gate 4~~ | removed | raw hard_hit_rate is not a valid ordering proxy for composite P(hard) = P(swing) × P(contact\|swing) × P(hard\|contact) |
 
 ## Status & Next Steps
-**Done:** data pipeline, preprocessing, three-stage XGBoost, calibration, zone/family/contextual hitter features, switch hitter support, 20-player tiered validation, Flask demo on Render (15 curated hitters, demo mode hides Game Log tab), xwOBA regressor (trained, wired into predict_combined), AAA hitter profile pipeline (Task 2), per-league separated report module (Task 3).
+**Done:** data pipeline, preprocessing, three-stage XGBoost, calibration, zone/family/contextual hitter features, switch hitter support, 20-player tiered validation, Flask demo on Render (15 curated hitters, demo mode hides Game Log tab), xwOBA regressor (trained, wired into predict_combined), AAA hitter profile pipeline (Task 2), per-league separated report module (Task 3), V5 retrain (89 features, Prompts 2-4), PVHI derived metric (Prompt 5).
 
-**Next:** xwOBA regressor training (Phase 1.5 — model exists, needs training run), count-specific hitter rates (hard_contact only), pitcher features re-integration, Phase 2 LSTM/Transformer sequencing.
+**PVHI (Pitch vs. Hitter Index):** Derived metric on top of V5 model. Returns `pvhi`, `pvhi_stuff`, `pvhi_location`, `pvhi_count`, `pvhi_interpretation` in every `predict_pitch()` output dict. Scale: 100 = this hitter's average pitch. Components: Stuff (0.15), Location (0.65), Count (0.20). Validation matrices in `validation/pvhi_phase*.csv`. Weights informed by V5 feature importance (location-dominated) and may be tuned after regression analysis.
+
+**Next:** PVHI weight optimization via outcome regression, count-specific hitter rates (hard_contact only), pitcher features re-integration, Phase 2 LSTM/Transformer sequencing.
