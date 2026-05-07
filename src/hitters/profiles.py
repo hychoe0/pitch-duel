@@ -38,7 +38,11 @@ LEAGUE_AVG = {
     "whiff_rate":              0.25,
     "zone_xwoba":              0.380,  # MLB avg xwOBA on batted balls (pitch-clock era)
     "overall_xwoba_per_pitch": 0.075,  # MLB avg xwOBA across all pitch types
+    "avg_zone_run_value":      0.115,  # MLB avg per-pitch xwOBA for strike-zone pitches (zones 1-9)
 }
+
+# League-average per-pitch xwOBA for strike-zone pitches only (always > LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH)
+LEAGUE_AVG_ZONE_RUN_VALUE = 0.115
 
 # Recency weights for hitter profiles — aggressive toward pitch-clock era
 PROFILE_RECENCY_WEIGHTS = {
@@ -172,7 +176,8 @@ class HitterProfile:
     zone_hard_hit_rates: dict = field(default_factory=dict)        # str(zone_id) -> float
     family_swing_rates: dict = field(default_factory=dict)         # family_str -> float
     family_whiff_rates: dict = field(default_factory=dict)         # family_str -> float
-    overall_xwoba_per_pitch: float = 0.0  # mean per-pitch xwOBA (denominator for PVHI)
+    overall_xwoba_per_pitch: float = 0.0   # mean per-pitch xwOBA (denominator for PVHI)
+    avg_zone_run_value: float = 0.0        # mean per-pitch xwOBA for strike-zone pitches only (always > overall)
     sample_size: int = 0
     is_thin_sample: bool = False
     league: str = "MLB"  # "MLB" or "AAA"; default keeps old saved profiles loading correctly
@@ -427,6 +432,31 @@ def compute_overall_xwoba_per_pitch(df: pd.DataFrame, w: np.ndarray) -> float:
     return float(np.average(xwoba_vals, weights=w))
 
 
+def compute_avg_zone_run_value(df: pd.DataFrame, w: np.ndarray) -> float:
+    """
+    Weighted mean per-pitch xwOBA for pitches in the strike zone (zones 1-9).
+
+    Always >= overall_xwoba_per_pitch because ball zones (11-14) contribute
+    mostly 0.0 and are excluded here.
+    """
+    if len(df) == 0 or w.sum() < 50:
+        return LEAGUE_AVG_ZONE_RUN_VALUE
+    zone_mask = df["zone"].isin(set(STRIKE_ZONES))
+    sub = df[zone_mask].copy()
+    if len(sub) == 0:
+        return LEAGUE_AVG_ZONE_RUN_VALUE
+    sub_w = w[df.index.get_indexer(sub.index)]
+    if sub_w.sum() < 50:
+        return LEAGUE_AVG_ZONE_RUN_VALUE
+    is_contact = sub["description"].isin(_HIT_INTO_PLAY_DESCRIPTIONS)
+    xwoba_vals = np.where(
+        is_contact & sub["estimated_woba_using_speedangle"].notna(),
+        sub["estimated_woba_using_speedangle"].fillna(0.0).values,
+        0.0,
+    )
+    return float(np.average(xwoba_vals, weights=sub_w))
+
+
 def get_overall_xwoba_per_pitch(profile: "HitterProfile") -> float:
     """Returns profile value, or league avg if 0.0/missing (backward compat)."""
     if profile.overall_xwoba_per_pitch <= 0.0:
@@ -461,11 +491,13 @@ def _blend(computed: float, league_avg: float, weighted_pa: float) -> float:
 
 
 def _blend_profile(profile: HitterProfile, weighted_pa: float) -> HitterProfile:
-    profile.swing_rate    = _blend(profile.swing_rate,    LEAGUE_AVG["swing_rate"],    weighted_pa)
-    profile.chase_rate    = _blend(profile.chase_rate,    LEAGUE_AVG["chase_rate"],    weighted_pa)
-    profile.contact_rate  = _blend(profile.contact_rate,  LEAGUE_AVG["contact_rate"],  weighted_pa)
-    profile.hard_hit_rate = _blend(profile.hard_hit_rate, LEAGUE_AVG["hard_hit_rate"], weighted_pa)
-    profile.whiff_rate    = _blend(profile.whiff_rate,    LEAGUE_AVG["whiff_rate"],    weighted_pa)
+    profile.swing_rate             = _blend(profile.swing_rate,             LEAGUE_AVG["swing_rate"],          weighted_pa)
+    profile.chase_rate             = _blend(profile.chase_rate,             LEAGUE_AVG["chase_rate"],          weighted_pa)
+    profile.contact_rate           = _blend(profile.contact_rate,           LEAGUE_AVG["contact_rate"],        weighted_pa)
+    profile.hard_hit_rate          = _blend(profile.hard_hit_rate,          LEAGUE_AVG["hard_hit_rate"],       weighted_pa)
+    profile.whiff_rate             = _blend(profile.whiff_rate,             LEAGUE_AVG["whiff_rate"],          weighted_pa)
+    profile.overall_xwoba_per_pitch = _blend(profile.overall_xwoba_per_pitch, LEAGUE_AVG["overall_xwoba_per_pitch"], weighted_pa)
+    profile.avg_zone_run_value     = _blend(profile.avg_zone_run_value,     LEAGUE_AVG["avg_zone_run_value"],  weighted_pa)
     for z in ALL_ZONES:
         if z in profile.zone_swing_rates:
             profile.zone_swing_rates[z] = _blend(profile.zone_swing_rates[z], LEAGUE_AVG["swing_rate"], weighted_pa)
@@ -596,6 +628,7 @@ def build_profile(
         family_swing_rates=compute_family_swing_rates(sub, w, swing_rate) if n > 0 else {f: swing_rate for f in PITCH_FAMILY_LIST},
         family_whiff_rates=compute_family_whiff_rates(sub, w, whiff_rate) if n > 0 else {f: whiff_rate for f in PITCH_FAMILY_LIST},
         overall_xwoba_per_pitch=compute_overall_xwoba_per_pitch(sub, w) if n > 0 else LEAGUE_AVG_OVERALL_XWOBA_PER_PITCH,
+        avg_zone_run_value=compute_avg_zone_run_value(sub, w) if n > 0 else LEAGUE_AVG_ZONE_RUN_VALUE,
         sample_size=n,
         is_thin_sample=is_thin,
     )

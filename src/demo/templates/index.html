@@ -1236,6 +1236,39 @@
                        </div>`
                     : ''
                 }
+                ${(data.pvhi && data.pvhi.pvhi != null) ? (() => {
+                    const pv = data.pvhi;
+                    const pvColor = pv.pvhi >= 130 ? '#f85149' : pv.pvhi >= 110 ? '#f0883e' : pv.pvhi >= 90 ? '#d29922' : pv.pvhi >= 70 ? '#3fb950' : '#58a6ff';
+                    const interpLabel = {'high_danger':'High Danger','above_average_danger':'Above Avg','neutral':'Neutral','safer_than_average':'Safer','very_safe':'Very Safe'}[pv.interpretation] || pv.interpretation;
+                    return `<div style="margin-top:10px;padding:10px 12px;background:#0d1117;border-radius:6px;border:1px solid #21262d;">
+                        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px;">
+                            <span style="font-size:0.8em;color:#6e7681;white-space:nowrap;">PVHI</span>
+                            <span title="Pitch vs. Hitter Index — 100 = average danger for this hitter. Combines physics similarity (Stuff), zone damage history (Location), and count aggressiveness." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
+                            <span style="font-size:1.4em;font-weight:bold;color:${pvColor};">${pv.pvhi.toFixed(1)}</span>
+                            <span style="font-size:0.8em;color:${pvColor};font-weight:500;">${interpLabel}</span>
+                        </div>
+                        <div style="display:flex;gap:18px;flex-wrap:wrap;">
+                            <div style="font-size:0.78em;color:#6e7681;">
+                                Stuff <span style="color:#c9d1d9;font-weight:500;">${pv.pvhi_stuff.toFixed(1)}</span>
+                                <span style="color:#484f58;margin:0 4px;">·</span>
+                                Location <span style="color:#c9d1d9;font-weight:500;">${pv.pvhi_location.toFixed(1)}</span>
+                                <span style="color:#484f58;margin:0 4px;">·</span>
+                                Count <span style="color:#c9d1d9;font-weight:500;">${pv.pvhi_count.toFixed(1)}</span>
+                            </div>
+                        </div>
+                    </div>`;
+                })() : ''}
+                ${(data.stuff && data.stuff.xwoba != null) ? (() => {
+                    const s = data.stuff;
+                    return `<div style="margin-top:6px;padding:7px 12px;background:#0d1117;border-radius:6px;border:1px solid #21262d;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                        <span style="font-size:0.78em;color:#6e7681;white-space:nowrap;">Stuff vs. Hitter</span>
+                        <span title="Mean xwOBA from physics-similar pitches against this hitter's history. Based on ${s.n_neighbors} neighbor pitches." style="cursor:help;font-size:0.72em;color:#484f58;border:1px solid #484f58;border-radius:50%;width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">?</span>
+                        <span style="font-size:0.82em;color:#8b949e;">xwOBA</span>
+                        <span style="font-size:1.05em;font-weight:bold;color:${xwobaColor(s.xwoba * 4)};">${s.xwoba.toFixed(3)}</span>
+                        <span style="font-size:0.78em;color:#6e7681;">whiff ${(s.whiff*100).toFixed(0)}%</span>
+                        <span style="font-size:0.75em;color:#484f58;">(${s.n_neighbors} neighbors, sim ${s.similarity != null ? s.similarity.toFixed(2) : '—'})</span>
+                    </div>`;
+                })() : ''}
             </div>`;
 
             const resultEl = document.getElementById('result_demo');

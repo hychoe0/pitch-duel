@@ -39,6 +39,8 @@
     "13": 0.25,
     "14": 0.25
   },
+  "zone_xwoba_rates": {},
+  "zone_hard_hit_rates": {},
   "family_swing_rates": {
     "fastball": 0.47,
     "breaking": 0.47,
@@ -51,6 +53,9 @@
     "offspeed": 0.25,
     "other": 0.25
   },
+  "overall_xwoba_per_pitch": 0.075,
+  "avg_zone_run_value": 0.115,
   "sample_size": 0,
-  "is_thin_sample": true
+  "is_thin_sample": true,
+  "league": "MLB"
 }

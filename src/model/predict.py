@@ -624,9 +624,40 @@ def predict_pitch(
         predicted_xwoba_per_pitch = float(np.clip(raw_xwoba, 0.0, 2.0))
         context_xwoba             = _xwoba_context(predicted_xwoba_per_pitch)
 
-    # PVHI — derived hitter-specific danger index (no model retrain needed)
-    from src.model.pvhi import compute_pvhi, interpret_pvhi
-    pvhi_result = compute_pvhi(pitch, profile, stuff_features, new_context)
+    # PVHI — unified kNN lookup (11 dims: stuff + location + count)
+    from src.model.pvhi import compute_pvhi
+    pvhi_result = compute_pvhi(pitch, profile, player_id=int(profile.player_id))
+
+    # Debug snapshot: every feature value fed to the model + PVHI intermediates
+    from src.hitters.profiles import PITCH_FAMILIES as _PF
+    _pitch_family = next(
+        (fam for fam, types in _PF.items() if pitch.get("pitch_type") in types), "other"
+    )
+    _encoded_dbg = encode_pitch_dict(pitch, encodings)
+    _merged_dbg  = {**_encoded_dbg, **combined_features}
+    _debug_features = {
+        col: round(float(_merged_dbg[col]), 6) if _merged_dbg.get(col) is not None else None
+        for col in feature_cols
+    }
+    _debug = {
+        "statcast_zone":  _zone,
+        "pitch_family":   _pitch_family,
+        "feature_values": _debug_features,
+        "pvhi_debug":     pvhi_result.get("debug", {}),  # kNN intermediates
+        "profile_snapshot": {
+            "player_name":             profile.player_name,
+            "player_id":               int(profile.player_id),
+            "is_thin_sample":          is_thin,
+            "stand":                   profile.stand,
+            "swing_rate":              round(profile.swing_rate, 4),
+            "chase_rate":              round(profile.chase_rate, 4),
+            "contact_rate":            round(profile.contact_rate, 4),
+            "hard_hit_rate":           round(profile.hard_hit_rate, 4),
+            "whiff_rate":              round(profile.whiff_rate, 4),
+            "overall_xwoba_per_pitch": round(profile.overall_xwoba_per_pitch, 5),
+            "sample_size":             profile.sample_size,
+        },
+    }
 
     return {
         "p_swing":               round(p_swing, 4),
@@ -651,11 +682,12 @@ def predict_pitch(
         "stuff_vs_hitter_whiff":  round(stuff_features["stuff_vs_hitter_whiff"], 4),
         "stuff_n_neighbors":      stuff_features["n_neighbors_found"],
         "stuff_similarity":       round(stuff_features["similarity_quality"], 3),
-        "pvhi":                  pvhi_result["pvhi"],
-        "pvhi_stuff":            pvhi_result["pvhi_stuff"],
-        "pvhi_location":         pvhi_result["pvhi_location"],
-        "pvhi_count":            pvhi_result["pvhi_count"],
-        "pvhi_interpretation":   interpret_pvhi(pvhi_result["pvhi"]),
+        "pvhi":                    pvhi_result["pvhi"],
+        "pvhi_interpretation":     pvhi_result["pvhi_interpretation"],
+        "pvhi_n_neighbors":        pvhi_result["pvhi_n_neighbors"],
+        "pvhi_relaxation_level":   pvhi_result["pvhi_relaxation_level"],
+        "pvhi_similarity_quality": pvhi_result["pvhi_similarity_quality"],
+        "debug":                   _debug,
     }
 
 

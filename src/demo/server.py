@@ -439,6 +439,26 @@ def predict_demo():
                 ),
                 "xwoba_context": mr.xwoba_context,
             },
+
+            # Stuff vs. hitter (KNN physics similarity score)
+            "stuff": {
+                "xwoba":       round(mr.stuff_vs_hitter_xwoba, 4) if mr.stuff_vs_hitter_xwoba is not None else None,
+                "whiff":       round(mr.stuff_vs_hitter_whiff, 4) if mr.stuff_vs_hitter_whiff is not None else None,
+                "n_neighbors": mr.stuff_n_neighbors,
+                "similarity":  round(mr.stuff_similarity, 3) if mr.stuff_similarity is not None else None,
+            },
+
+            # PVHI — Pitch vs. Hitter Index (kNN unified lookup)
+            "pvhi": {
+                "pvhi":               mr.pvhi,
+                "interpretation":     mr.pvhi_interpretation,
+                "n_neighbors":        mr.pvhi_n_neighbors,
+                "relaxation_level":   mr.pvhi_relaxation_level,
+                "similarity_quality": mr.pvhi_similarity_quality,
+            },
+
+            # Full debug snapshot (feature vector, PVHI intermediates, profile used)
+            "debug": mr.model_debug,
         }
 
         return jsonify(response)

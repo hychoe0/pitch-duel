@@ -72,9 +72,25 @@ class MatchupResult:
     predicted_xwoba_on_contact: float = None
     xwoba_context: str = None
 
+    # Stuff vs. hitter (KNN physics similarity)
+    stuff_vs_hitter_xwoba: float = None
+    stuff_vs_hitter_whiff: float = None
+    stuff_n_neighbors:     int   = 0
+    stuff_similarity:      float = None
+
+    # PVHI — Pitch vs. Hitter Index (kNN unified lookup)
+    pvhi:                    float = None
+    pvhi_interpretation:     str   = None
+    pvhi_n_neighbors:        int   = 0
+    pvhi_relaxation_level:   int   = 5
+    pvhi_similarity_quality: float = None
+
     # Evidence (optional, for display)
     top_similar_pitches: list = field(default_factory=list)
     outcome_distribution: dict = field(default_factory=dict)
+
+    # Full debug snapshot from predict_pitch() (feature values, PVHI intermediates, profile)
+    model_debug: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +132,16 @@ def predict_matchup(
     m_p_hard  = model_result["p_hard_contact"]
     m_xwoba         = model_result.get("predicted_xwoba_per_pitch")
     m_xwoba_context = model_result.get("xwoba_context")
+    m_stuff_xwoba   = model_result.get("stuff_vs_hitter_xwoba")
+    m_stuff_whiff   = model_result.get("stuff_vs_hitter_whiff")
+    m_stuff_n       = model_result.get("stuff_n_neighbors", 0)
+    m_stuff_sim     = model_result.get("stuff_similarity")
+    m_pvhi          = model_result.get("pvhi")
+    m_pvhi_interp   = model_result.get("pvhi_interpretation")
+    m_pvhi_n        = model_result.get("pvhi_n_neighbors", 0)
+    m_pvhi_level    = model_result.get("pvhi_relaxation_level", 5)
+    m_pvhi_sim      = model_result.get("pvhi_similarity_quality")
+    m_debug         = model_result.get("debug", {})
 
     # -- Path B: historical similarity lookup --
     h_swing = 0.0
@@ -212,8 +238,20 @@ def predict_matchup(
         predicted_xwoba_on_contact=None,  # LEGACY — always None; use predicted_xwoba_per_pitch
         xwoba_context=m_xwoba_context,
 
+        stuff_vs_hitter_xwoba=m_stuff_xwoba,
+        stuff_vs_hitter_whiff=m_stuff_whiff,
+        stuff_n_neighbors=m_stuff_n,
+        stuff_similarity=m_stuff_sim,
+
+        pvhi=m_pvhi,
+        pvhi_interpretation=m_pvhi_interp,
+        pvhi_n_neighbors=m_pvhi_n,
+        pvhi_relaxation_level=m_pvhi_level,
+        pvhi_similarity_quality=m_pvhi_sim,
+
         top_similar_pitches=top_pitches,
         outcome_distribution=outcome_dist,
+        model_debug=m_debug,
     )
 
 

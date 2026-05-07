@@ -531,6 +531,7 @@ function TabBar({ view, onChange }) {
     { id: "predict",   label: "Predict",  icon: <><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" fill="none"/><circle cx="12" cy="12" r="3" fill="currentColor"/></> },
     { id: "atbat",     label: "At-Bat",   icon: <><path d="M5 19l9-9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="16" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" fill="none"/><path d="M3 21l3-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></> },
     { id: "log",       label: "Game Log", disabled: true, icon: <><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" strokeWidth="1.6" fill="none"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></> },
+    { id: "debug",     label: "Debug",    icon: <><path d="M12 3a3 3 0 00-3 3v1H7a2 2 0 00-2 2v2l-1 1 1 1v2a2 2 0 002 2h2v1a3 3 0 006 0v-1h2a2 2 0 002-2v-2l1-1-1-1V9a2 2 0 00-2-2h-2V6a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round"/><circle cx="9.5" cy="11.5" r="1" fill="currentColor"/><circle cx="14.5" cy="11.5" r="1" fill="currentColor"/></> },
   ];
   return (
     <nav style={{
@@ -1064,7 +1065,7 @@ function PredictView({ hitter, hitterProfile, deviceConnected, modelVersion = "v
 
             {/* Feature drivers */}
             {drivers.length > 0 && (
-              <div className="pd-card" style={{ padding: 22 }}>
+              <div className="pd-card" style={{ padding: 22, marginBottom: 16 }}>
                 <span className="pd-eyebrow" style={{ marginBottom: 12, display: "block" }}>Top drivers</span>
                 {drivers.map((d, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -1079,6 +1080,7 @@ function PredictView({ hitter, hitterProfile, deviceConnected, modelVersion = "v
                 ))}
               </div>
             )}
+
           </>
         ) : null}
       </div>
@@ -1602,6 +1604,577 @@ function GameLogView({ hitter }) {
 </script>
 
 <!-- ═══════════════════════════════════════════════════════
+     Block 9A — DebugView (password-gated, debug tab only)
+     ═══════════════════════════════════════════════════════ -->
+<script type="text/babel">
+{% raw %}
+// The 15 hitters that have pre-built demo profiles (same set as Render deployment)
+const DEMO_HITTER_NAMES = new Set([
+  "Judge, Aaron","Betts, Mookie","Kiner-Falefa, Isiah","Ohtani, Shohei",
+  "Raleigh, Cal","Soto, Juan","Witt, Bobby","Duran, Jarren",
+  "Carroll, Corbin","Henderson, Gunnar","Volpe, Anthony","Caissie, Owen",
+  "Winn, Masyn","Langford, Wyatt","Lee, Jung Hoo",
+]);
+
+// ── Feature groups for display (89 total) ──────────────────────────────────
+const FEATURE_GROUPS = [
+  { label: "Pitch physics (11)", color: "#2563EB", keys: [
+    "release_speed","spin_to_velo_ratio","pfx_x","pfx_z",
+    "release_pos_x","release_pos_z","release_extension",
+    "plate_x","plate_z","pitch_type_enc","era_flag_enc",
+  ]},
+  { label: "Count / game context (12)", color: "#7c3aed", keys: [
+    "balls","strikes","pitch_number","prev_pitch_type_enc","prev_pitch_speed",
+    "prev_pitch_result_enc","on_1b_flag","on_2b_flag","on_3b_flag",
+    "inning","score_diff","times_through_order",
+  ]},
+  { label: "Hitter aggregate profile (7)", color: "#0891b2", keys: [
+    "hitter_swing_rate","hitter_chase_rate","hitter_contact_rate",
+    "hitter_hard_hit_rate","hitter_whiff_rate","hitter_stand_enc","p_throws_enc",
+  ]},
+  { label: "Per-pitch-type contact (11)", color: "#059669", keys: [
+    "hitter_contact_rate_FF","hitter_contact_rate_CH","hitter_contact_rate_CU",
+    "hitter_contact_rate_FC","hitter_contact_rate_KN","hitter_contact_rate_SC",
+    "hitter_contact_rate_SI","hitter_contact_rate_SL","hitter_contact_rate_SV",
+    "hitter_contact_rate_FS","hitter_contact_rate_ST",
+  ]},
+  { label: "Zone rates — swing (13)", color: "#d97706", keys: [
+    "hitter_swing_rate_z1","hitter_swing_rate_z2","hitter_swing_rate_z3",
+    "hitter_swing_rate_z4","hitter_swing_rate_z5","hitter_swing_rate_z6",
+    "hitter_swing_rate_z7","hitter_swing_rate_z8","hitter_swing_rate_z9",
+    "hitter_swing_rate_z11","hitter_swing_rate_z12","hitter_swing_rate_z13","hitter_swing_rate_z14",
+  ]},
+  { label: "Zone rates — whiff (13)", color: "#b45309", keys: [
+    "hitter_whiff_rate_z1","hitter_whiff_rate_z2","hitter_whiff_rate_z3",
+    "hitter_whiff_rate_z4","hitter_whiff_rate_z5","hitter_whiff_rate_z6",
+    "hitter_whiff_rate_z7","hitter_whiff_rate_z8","hitter_whiff_rate_z9",
+    "hitter_whiff_rate_z11","hitter_whiff_rate_z12","hitter_whiff_rate_z13","hitter_whiff_rate_z14",
+  ]},
+  { label: "Pitch family rates (8)", color: "#be185d", keys: [
+    "hitter_swing_rate_fastball","hitter_swing_rate_breaking",
+    "hitter_swing_rate_offspeed","hitter_swing_rate_other",
+    "hitter_whiff_rate_fastball","hitter_whiff_rate_breaking",
+    "hitter_whiff_rate_offspeed","hitter_whiff_rate_other",
+  ]},
+  { label: "Contextual @ inference — V4 (5)", color: "#6b7280", keys: [
+    "hitter_swing_rate_this_zone","hitter_whiff_rate_this_zone",
+    "hitter_swing_rate_this_family","hitter_whiff_rate_this_family",
+    "hitter_swing_rate_this_count",
+  ]},
+  { label: "Contextual @ inference — V5 (7)", color: "#0f766e", keys: [
+    "hitter_zone_swing_rate","hitter_zone_whiff_rate",
+    "hitter_zone_xwoba","hitter_zone_hard_hit_rate",
+    "hitter_contact_rate_this_pitch",
+    "hitter_family_swing_rate","hitter_family_whiff_rate",
+  ]},
+  { label: "Stuff vs. Hitter / KNN (2)", color: ACCENT, keys: [
+    "stuff_vs_hitter_xwoba","stuff_vs_hitter_whiff",
+  ]},
+];
+
+// ── Shared helper sub-components ───────────────────────────────────────────
+function DbgRow({ label, value, note, highlight }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "baseline",
+      padding: "4px 0", borderBottom: "1px solid var(--pd-line-2)",
+      background: highlight ? "rgba(217,37,51,0.05)" : "transparent",
+    }}>
+      <span style={{ fontSize: 11, color: "var(--pd-ink-2)", fontFamily: "var(--pd-font-mono)" }}>{label}</span>
+      <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        {note && <span style={{ fontSize: 10, color: "var(--pd-ink-4)" }}>{note}</span>}
+        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "var(--pd-font-mono)",
+          color: highlight ? ACCENT : "var(--pd-ink)" }}>{value}</span>
+      </span>
+    </div>
+  );
+}
+
+function DbgSection({ title, color, children }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
+        color: color || "var(--pd-ink-3)", marginBottom: 6, paddingBottom: 4,
+        borderBottom: `2px solid ${color || "var(--pd-line)"}`,
+      }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+// ── Password gate ──────────────────────────────────────────────────────────
+function DebugGate({ onUnlock }) {
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState(false);
+  const check = () => {
+    if (pin === "0001") { onUnlock(); }
+    else { setErr(true); setPin(""); }
+  };
+  return (
+    <div style={{
+      flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+      background: "var(--pd-cream)",
+    }}>
+      <div style={{
+        background: "var(--pd-bone)", borderRadius: 20, padding: "40px 48px",
+        boxShadow: "0 8px 40px rgba(0,0,0,0.12)", textAlign: "center", width: 320,
+      }}>
+        <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 32, marginBottom: 4 }}>🔒</div>
+        <div className="pd-display" style={{ fontSize: 22, marginBottom: 4 }}>Debug Access</div>
+        <div style={{ fontSize: 13, color: "var(--pd-ink-3)", marginBottom: 24 }}>Enter PIN to continue</div>
+        <input
+          type="password" maxLength={4} value={pin}
+          onChange={e => { setPin(e.target.value); setErr(false); }}
+          onKeyDown={e => e.key === "Enter" && check()}
+          placeholder="····"
+          style={{
+            width: "100%", padding: "12px 16px", borderRadius: 10, textAlign: "center",
+            border: `1.5px solid ${err ? "var(--pd-bad)" : "var(--pd-line)"}`,
+            background: err ? "var(--pd-bad-soft)" : "var(--pd-cream)",
+            fontFamily: "var(--pd-font-mono)", fontSize: 24, letterSpacing: 8,
+            outline: "none", color: "var(--pd-ink)", marginBottom: 8,
+          }}
+          autoFocus
+        />
+        {err && <div style={{ fontSize: 12, color: "var(--pd-bad)", marginBottom: 8 }}>Wrong PIN</div>}
+        <button onClick={check} className="pd-btn pd-btn--primary" style={{ width: "100%", marginTop: 4 }}>Unlock</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main DebugView component ───────────────────────────────────────────────
+function DebugView({ allHitters, modelVersion = "v1" }) {
+  const [unlocked,  setUnlocked] = useState(false);
+  const [hitter,    setHitter]   = useState(null);
+  const [picker,    setPicker]   = useState(false);
+
+  // Pitch controls
+  const _d0 = PITCH_DEFAULTS.FF;
+  const [pitchType, setPitchType] = useState("FF");
+  const [velo,   setVelo]   = useState(94);
+  const [plateX, setPlateX] = useState(0);
+  const [plateZ, setPlateZ] = useState(2.5);
+  const [balls,  setBalls]  = useState(0);
+  const [strikes,setStrikes]= useState(0);
+  const [spin,   setSpin]   = useState(_d0.spin);
+  const [pfxX,   setPfxX]   = useState(_d0.pfx_x);
+  const [pfxZ,   setPfxZ]   = useState(_d0.pfx_z);
+  const [relX,   setRelX]   = useState(_d0.rel_x);
+  const [relZ,   setRelZ]   = useState(_d0.rel_z);
+  const [ext,    setExt]    = useState(_d0.ext);
+
+  const [loading, setLoading] = useState(false);
+  const [result,  setResult]  = useState(null);
+  const [error,   setError]   = useState(null);
+
+  const demoHitters = allHitters.filter(h => DEMO_HITTER_NAMES.has(h.name));
+
+  const changePitchType = (code) => {
+    setPitchType(code);
+    const d = PITCH_DEFAULTS[code] || PITCH_DEFAULTS.FF;
+    setSpin(d.spin); setPfxX(d.pfx_x); setPfxZ(d.pfx_z);
+    setRelX(d.rel_x); setRelZ(d.rel_z); setExt(d.ext);
+  };
+
+  const runPrediction = async () => {
+    if (!hitter) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch("/api/predict_demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hitter_name: hitter.name,
+          model_version: modelVersion,
+          pitch: {
+            release_speed: velo, plate_x: plateX, plate_z: plateZ,
+            pitch_type: pitchType, balls, strikes,
+            release_spin_rate: spin, pfx_x: pfxX, pfx_z: pfxZ,
+            release_pos_x: relX, release_pos_z: relZ, release_extension: ext,
+            p_throws: "R", pitch_number: 1,
+            on_1b: 0, on_2b: 0, on_3b: 0,
+            inning: 1, score_diff: 0, times_through_order: 1,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      setResult(await res.json());
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  if (!unlocked) return <DebugGate onUnlock={() => setUnlocked(true)}/>;
+
+  const stepBtn = {
+    width: 32, height: 22, borderRadius: 6, border: "none",
+    background: "var(--pd-bone)", color: "var(--pd-ink-2)",
+    fontSize: 14, fontWeight: 600, cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontFamily: "inherit",
+  };
+  const numInput = {
+    width: 64, textAlign: "center", padding: "6px 8px", borderRadius: 8,
+    border: "1.5px solid var(--pd-line)", background: "var(--pd-cream)",
+    fontFamily: "var(--pd-font-mono)", fontSize: 14, color: "var(--pd-ink)", outline: "none",
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+      {/* ── LEFT: inputs ── */}
+      <div className="pd-scroll" style={{
+        flex: "0 0 320px", padding: "20px 22px", overflowY: "auto",
+        borderRight: "1px solid var(--pd-line)", background: "var(--pd-cream)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <span style={{
+            fontFamily: "var(--pd-font-mono)", fontSize: 10, fontWeight: 700,
+            background: ACCENT, color: "#fff", borderRadius: 6, padding: "3px 8px",
+          }}>DEBUG</span>
+          <span className="pd-eyebrow">Computation Inspector</span>
+        </div>
+
+        {/* Hitter picker button */}
+        <div style={{ marginBottom: 16 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 6 }}>Hitter (15 demo profiles)</div>
+          <button onClick={() => setPicker(true)} style={{
+            width: "100%", padding: "10px 14px", borderRadius: 12, textAlign: "left",
+            border: `1.5px solid ${hitter ? ACCENT : "var(--pd-line)"}`,
+            background: "var(--pd-bone)", cursor: "pointer", fontFamily: "inherit",
+            fontSize: 14, fontWeight: 600, color: hitter ? "var(--pd-ink)" : "var(--pd-ink-4)",
+          }}>
+            {hitter ? displayName(hitter.name) : "Tap to pick a hitter…"}
+          </button>
+        </div>
+
+        {/* Pitch type pills */}
+        <div style={{ marginBottom: 14 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 6 }}>Pitch type</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {PITCH_TYPES.map(p => {
+              const active = pitchType === p.code;
+              return (
+                <button key={p.code} onClick={() => changePitchType(p.code)} style={{
+                  padding: "7px 12px", borderRadius: 999,
+                  border: `1.5px solid ${active ? p.color : "var(--pd-line)"}`,
+                  background: active ? p.color : "var(--pd-bone)",
+                  color: active ? "#fff" : "var(--pd-ink-3)",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer",
+                }}>
+                  {p.code}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Velocity */}
+        <div style={{ marginBottom: 12 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 4 }}>Velocity</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button style={stepBtn} onClick={() => setVelo(v => Math.max(60, v - 1))}>−</button>
+            <input type="number" value={velo} onChange={e => setVelo(Number(e.target.value))} style={numInput}/>
+            <button style={stepBtn} onClick={() => setVelo(v => Math.min(105, v + 1))}>+</button>
+            <span style={{ fontSize: 12, color: "var(--pd-ink-3)" }}>mph</span>
+          </div>
+        </div>
+
+        {/* Location */}
+        <div style={{ marginBottom: 12 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 4 }}>Location (plate_x / plate_z)</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--pd-ink-3)", width: 14 }}>X</span>
+              <button style={stepBtn} onClick={() => setPlateX(v => Math.round((v - 0.1) * 10) / 10)}>−</button>
+              <input type="number" value={plateX} onChange={e => setPlateX(Number(e.target.value))} style={numInput} step="0.1"/>
+              <button style={stepBtn} onClick={() => setPlateX(v => Math.round((v + 0.1) * 10) / 10)}>+</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--pd-ink-3)", width: 14 }}>Z</span>
+              <button style={stepBtn} onClick={() => setPlateZ(v => Math.round((v - 0.1) * 10) / 10)}>−</button>
+              <input type="number" value={plateZ} onChange={e => setPlateZ(Number(e.target.value))} style={numInput} step="0.1"/>
+              <button style={stepBtn} onClick={() => setPlateZ(v => Math.round((v + 0.1) * 10) / 10)}>+</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Count */}
+        <div style={{ marginBottom: 16 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 4 }}>Count (balls–strikes)</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[["Balls", balls, setBalls, 4], ["Strikes", strikes, setStrikes, 3]].map(([lbl, val, set, max]) => (
+              <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 11, color: "var(--pd-ink-3)", width: 36 }}>{lbl}</span>
+                <button style={stepBtn} onClick={() => set(v => Math.max(0, v - 1))}>−</button>
+                <span style={{ fontFamily: "var(--pd-font-mono)", fontSize: 14, fontWeight: 700, width: 16, textAlign: "center" }}>{val}</span>
+                <button style={stepBtn} onClick={() => set(v => Math.min(max, v + 1))}>+</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Advanced pitch params */}
+        <div style={{ marginBottom: 16 }}>
+          <div className="pd-eyebrow" style={{ marginBottom: 6 }}>Advanced pitch physics</div>
+          {[
+            ["Spin rate", spin, setSpin, "rpm", 1],
+            ["pfx_x", pfxX, setPfxX, "ft", 0.1],
+            ["pfx_z", pfxZ, setPfxZ, "ft", 0.1],
+            ["Rel pos X", relX, setRelX, "ft", 0.1],
+            ["Rel pos Z", relZ, setRelZ, "ft", 0.1],
+            ["Extension", ext, setExt, "ft", 0.1],
+          ].map(([lbl, val, set, unit, step]) => (
+            <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--pd-ink-3)", width: 68 }}>{lbl}</span>
+              <button style={stepBtn} onClick={() => set(v => Math.round((v - step) * 100) / 100)}>−</button>
+              <input type="number" value={val} step={step}
+                onChange={e => set(Number(e.target.value))} style={{ ...numInput, width: 72 }}/>
+              <button style={stepBtn} onClick={() => set(v => Math.round((v + step) * 100) / 100)}>+</button>
+              <span style={{ fontSize: 11, color: "var(--pd-ink-3)" }}>{unit}</span>
+            </div>
+          ))}
+        </div>
+
+        {error && <div style={{ color: "var(--pd-bad)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+        <button onClick={runPrediction} disabled={!hitter || loading} className="pd-btn pd-btn--primary"
+          style={{ width: "100%", opacity: (!hitter || loading) ? 0.5 : 1 }}>
+          {loading ? "Running…" : "Run prediction"}
+        </button>
+      </div>
+
+      {/* ── RIGHT: debug breakdown ── */}
+      <div className="pd-scroll" style={{
+        flex: 1, overflowY: "auto", padding: "20px 28px", background: "var(--pd-bg)",
+      }}>
+        {result ? <DebugResults result={result} pitchType={pitchType}/> : (
+          <div style={{ color: "var(--pd-ink-3)", fontSize: 14, paddingTop: 60, textAlign: "center" }}>
+            Pick a hitter and run a prediction to inspect all computed values.
+          </div>
+        )}
+      </div>
+
+      {/* Inline hitter picker overlay */}
+      {picker && (
+        <div onClick={() => setPicker(false)} style={{
+          position: "absolute", inset: 0, background: "rgba(20,15,15,0.5)",
+          backdropFilter: "blur(8px)", zIndex: 50,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "var(--pd-cream)", borderRadius: 20, padding: 24,
+            width: "min(480px,100%)", maxHeight: "70%", overflowY: "auto",
+            boxShadow: "0 30px 80px rgba(0,0,0,0.3)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div>
+                <span className="pd-eyebrow">Debug mode</span>
+                <h2 className="pd-display" style={{ fontSize: 22, marginTop: 2 }}>Pick demo hitter</h2>
+              </div>
+              <button onClick={() => setPicker(false)} style={{
+                width: 32, height: 32, borderRadius: 999, border: "none",
+                background: "var(--pd-line-2)", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg width="12" height="12" viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8" stroke="var(--pd-ink-2)" strokeWidth="1.8" strokeLinecap="round"/></svg>
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
+              {demoHitters.map(h => (
+                <button key={h.name} onClick={() => { setHitter(h); setResult(null); setPicker(false); }} style={{
+                  padding: "10px 14px", borderRadius: 10, textAlign: "left",
+                  border: `1.5px solid ${hitter?.name === h.name ? ACCENT : "var(--pd-line)"}`,
+                  background: hitter?.name === h.name ? "rgba(217,37,51,0.06)" : "var(--pd-bone)",
+                  cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+                  color: "var(--pd-ink)",
+                }}>
+                  {displayName(h.name)}
+                  <div style={{ fontSize: 11, color: "var(--pd-ink-3)", fontWeight: 400, marginTop: 2 }}>{h.stand || "R"}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DebugResults: the detailed breakdown panel ─────────────────────────────
+function DebugResults({ result, pitchType }) {
+  const bl     = result?.blend  || {};
+  const xw     = result?.xwoba  || {};
+  const pvhi   = result?.pvhi   || {};
+  const stuff  = result?.stuff  || {};
+  const dbg    = result?.debug  || {};
+  const feat   = dbg.feature_values || {};
+  const pd     = dbg.pvhi_debug     || {};
+  const prof   = dbg.profile_snapshot || {};
+
+  const f4  = v => (v != null && !isNaN(v)) ? Number(v).toFixed(4) : "—";
+  const f2  = v => (v != null && !isNaN(v)) ? Number(v).toFixed(2) : "—";
+  const pct = v => (v != null && !isNaN(v)) ? (Number(v) * 100).toFixed(1) + "%" : "—";
+
+  return (
+    <div>
+
+      {/* ── 0. Summary header ── */}
+      <div style={{ marginBottom: 24 }}>
+        <span className="pd-eyebrow" style={{ color: ACCENT }}>
+          {result.hitter} · {pitchType} · {result.input_features?.count} count · Zone {dbg.statcast_zone} ({dbg.pitch_family})
+        </span>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginTop: 10 }}>
+          {[
+            { l: "P(swing)", v: pct(bl.p_swing), c: "#2563EB" },
+            { l: "P(contact|sw)", v: pct(bl.p_contact), c: "#059669" },
+            { l: "P(hard|con)", v: pct(bl.p_hard_contact), c: "var(--pd-warn)" },
+            { l: "P(hard) comp.", v: pct(bl.p_hard), c: ACCENT },
+            { l: "xwOBA/pitch", v: xw.predicted_xwoba_per_pitch != null ? Number(xw.predicted_xwoba_per_pitch).toFixed(4) : "—", c: "var(--pd-ink-2)" },
+          ].map(x => (
+            <div key={x.l} className="pd-card" style={{ padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: 10, color: "var(--pd-ink-3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{x.l}</div>
+              <div style={{ fontFamily: "var(--pd-font-mono)", fontSize: 18, fontWeight: 700, color: x.c }}>{x.v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── 1. PVHI step-by-step ── */}
+      <div className="pd-card" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <span className="pd-eyebrow">PVHI — Pitch vs. Hitter Index  (kNN)</span>
+          <span style={{
+            fontFamily: "var(--pd-font-mono)", fontSize: 20, fontWeight: 700,
+            color: pvhi.pvhi >= 130 ? "var(--pd-bad)" : pvhi.pvhi >= 90 ? "var(--pd-warn)" : "var(--pd-good)",
+          }}>{pvhi.pvhi != null ? pvhi.pvhi.toFixed(1) : "—"}</span>
+          <span style={{ fontSize: 12, color: "var(--pd-ink-3)" }}>
+            {pvhi.interpretation?.replace(/_/g, " ")} · 100 = this hitter's avg pitch
+          </span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+
+          {/* Query vector */}
+          <div>
+            <DbgSection title="11-dim query vector (standardized z-scores)" color="#8b5cf6">
+              <DbgRow label="pitch_type" value={pd.pitch_type} note="exact match → Level 1"/>
+              <DbgRow label="pitch_family" value={pd.pitch_family} note="family match → Level 2"/>
+              <DbgRow label="release_speed" value={f2(pd.query?.release_speed)} note="mph (raw)"/>
+              <DbgRow label="spin_to_velo_ratio" value={f4(pd.query?.spin_to_velo_ratio)} note="spin÷velo"/>
+              <DbgRow label="pfx_x" value={f4(pd.query?.pfx_x)} note="horizontal break (ft)"/>
+              <DbgRow label="pfx_z" value={f4(pd.query?.pfx_z)} note="vertical break (ft)"/>
+              <DbgRow label="plate_x" value={f4(pd.query?.plate_x)} note="horizontal location"/>
+              <DbgRow label="plate_z" value={f4(pd.query?.plate_z)} note="vertical location"/>
+              <DbgRow label="balls" value={pd.query?.balls} note="count — balls"/>
+              <DbgRow label="strikes" value={pd.query?.strikes} note="count — strikes"/>
+            </DbgSection>
+          </div>
+
+          {/* Relaxation cascade */}
+          <div>
+            <DbgSection title="Relaxation cascade & neighbor lookup" color="#f0883e">
+              <DbgRow label="relaxation_level" value={pvhi.relaxation_level}
+                note="1=exact type · 2=family · 3=all pitches · 4=stuff-only · 5=fallback" highlight/>
+              <DbgRow label="confidence" value={f4(pd.confidence)}
+                note="blend weight toward pvhi_raw (1.0 at Level 1, 0.0 at Level 5)"/>
+              <DbgRow label="n_neighbors" value={pd.n_neighbors}
+                note={`k=${pd.n_neighbors} nearest neighbors used (min 10 required)`}/>
+              <DbgRow label="avg_dist  (z-score space)" value={f4(pd.avg_dist)}
+                note="mean Euclidean distance to neighbors (lower = more similar)"/>
+              <DbgRow label="similarity_quality  = 1 − avg_dist/3" value={f4(pd.similarity_quality)}
+                note="0–1 quality score" highlight/>
+            </DbgSection>
+          </div>
+
+          {/* xwOBA computation */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <DbgSection title="xwOBA computation  →  PVHI final" color={ACCENT}>
+              <DbgRow label="neighbor_mean_xwoba" value={f4(pd.neighbor_mean_xwoba)}
+                note="mean xwOBA of k neighbors (0.0 for non-contact, positive for batted balls)" highlight/>
+              <DbgRow label="denom_overall_xwoba_per_pitch" value={f4(pd.denom_overall_xwoba_per_pitch)}
+                note="hitter's per-pitch xwOBA across ALL pitches (most = 0.0, only batted balls contribute)"/>
+              <DbgRow label="raw_ratio  = neighbor / denom" value={f4(pd.raw_ratio)}
+                note="ratio &gt; 1 means this pitch is more dangerous than hitter's average" highlight/>
+              <DbgRow label="pvhi_raw  = ratio × 100" value={f2(pd.pvhi_raw)} highlight/>
+              <DbgRow label="pvhi_blended  = confidence × pvhi_raw + (1−confidence) × 100" value={f2(pd.pvhi_blended)}
+                note={`confidence=${f4(pd.confidence)} → blended toward 100`}/>
+              <DbgRow label="pvhi_final  (clamped 0–200)" value={f2(pd.pvhi_final)}
+                note={pd.pvhi_raw > 200 ? "⚠ clamped from " + f2(pd.pvhi_raw) : "no clamp"} highlight/>
+            </DbgSection>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── 2. Hitter profile used ── */}
+      <div className="pd-card" style={{ padding: 20, marginBottom: 16 }}>
+        <span className="pd-eyebrow" style={{ marginBottom: 12, display: "block" }}>Hitter profile used</span>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 0 }}>
+          {[
+            ["player_name", prof.player_name],
+            ["player_id", prof.player_id],
+            ["stand", prof.stand],
+            ["is_thin_sample", String(prof.is_thin_sample)],
+            ["sample_size", prof.sample_size?.toLocaleString()],
+            ["overall_xwoba_per_pitch", f4(prof.overall_xwoba_per_pitch)],
+            ["swing_rate", f4(prof.swing_rate)],
+            ["chase_rate", f4(prof.chase_rate)],
+            ["contact_rate", f4(prof.contact_rate)],
+            ["hard_hit_rate", f4(prof.hard_hit_rate)],
+            ["whiff_rate", f4(prof.whiff_rate)],
+          ].map(([k, v]) => (
+            <DbgRow key={k} label={k} value={v}/>
+          ))}
+        </div>
+      </div>
+
+      {/* ── 3. All 89 feature values ── */}
+      <div className="pd-card" style={{ padding: 20, marginBottom: 16 }}>
+        <span className="pd-eyebrow" style={{ marginBottom: 4, display: "block" }}>
+          Feature vector — {Object.keys(feat).length} features fed into model
+        </span>
+        <div style={{ fontSize: 11, color: "var(--pd-ink-3)", marginBottom: 14 }}>
+          Zone {dbg.statcast_zone} is derived from plate_x={feat.plate_x?.toFixed(2)} / plate_z={feat.plate_z?.toFixed(2)}.
+          Active family: {dbg.pitch_family}. Highlighted rows are the contextual features resolved for this specific pitch.
+        </div>
+
+        {FEATURE_GROUPS.map(grp => {
+          const isContext = grp.label.includes("Contextual") || grp.label.includes("Stuff");
+          return (
+            <div key={grp.label} style={{ marginBottom: 16 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
+                color: grp.color, marginBottom: 4, paddingBottom: 3,
+                borderBottom: `2px solid ${grp.color}`,
+              }}>{grp.label}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 0 }}>
+                {grp.keys.map(k => {
+                  const v = feat[k];
+                  const activeZone = k.includes(`_z${dbg.statcast_zone}`) || k.includes(`_${dbg.pitch_family}`);
+                  return (
+                    <DbgRow
+                      key={k}
+                      label={k}
+                      value={v != null ? (typeof v === "number" ? v.toFixed(4) : String(v)) : "—"}
+                      highlight={isContext || activeZone}
+                      note={activeZone && !isContext ? `← active zone ${dbg.statcast_zone}` : undefined}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+    </div>
+  );
+}
+{% endraw %}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
      Block 9 — HitterPicker overlay
      ═══════════════════════════════════════════════════════ -->
 <script type="text/babel">
@@ -1723,6 +2296,9 @@ function TabletApp({ hitters }) {
         )}
         {view === "log" && (
           <GameLogView hitter={hitter}/>
+        )}
+        {view === "debug" && (
+          <DebugView allHitters={hitters} modelVersion={modelVersion}/>
         )}
       </main>
 
