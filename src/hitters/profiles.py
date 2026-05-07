@@ -663,11 +663,14 @@ def profile_to_feature_dict(profile: HitterProfile) -> dict:
     for pt in PITCH_TYPE_CONTACT_KEYS:
         d[f"hitter_contact_rate_{pt}"] = by_type.get(pt, profile.contact_rate)
     # Zone swing rates (13 features: zones 1-9, 11-14)
+    # JSON round-trips convert int keys to str — check both int and str forms.
+    _sz = profile.zone_swing_rates
+    _wz = profile.zone_whiff_rates
     for z in ALL_ZONES:
-        d[f"hitter_swing_rate_z{z}"] = profile.zone_swing_rates.get(z, LEAGUE_AVG["swing_rate"])
+        d[f"hitter_swing_rate_z{z}"] = _sz.get(z, _sz.get(str(z), LEAGUE_AVG["swing_rate"]))
     # Zone whiff rates (13 features)
     for z in ALL_ZONES:
-        d[f"hitter_whiff_rate_z{z}"] = profile.zone_whiff_rates.get(z, LEAGUE_AVG["whiff_rate"])
+        d[f"hitter_whiff_rate_z{z}"] = _wz.get(z, _wz.get(str(z), LEAGUE_AVG["whiff_rate"]))
     # Pitch family swing rates (4 features)
     for fam in PITCH_FAMILY_LIST:
         d[f"hitter_swing_rate_{fam}"] = profile.family_swing_rates.get(fam, LEAGUE_AVG["swing_rate"])

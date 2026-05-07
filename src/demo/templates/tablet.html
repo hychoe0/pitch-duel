@@ -1744,6 +1744,77 @@ function DebugGate({ onUnlock }) {
   );
 }
 
+// ── ZonePicker — visual strike zone grid ─────────────────────────────────
+function ZonePicker({ plateX, plateZ, onSelect }) {
+  function _activeZone(px, pz) {
+    const X0 = -0.85, X1 = 0.85, Z0 = 1.5, Z1 = 3.5;
+    const xR = X1 - X0, zR = Z1 - Z0;
+    const xa = X0 + xR / 3, xb = X0 + 2 * xR / 3;
+    const za = Z0 + zR / 3, zb = Z0 + 2 * zR / 3;
+    if (px >= X0 && px <= X1 && pz >= Z0 && pz <= Z1) {
+      const col = px < xa ? 0 : px <= xb ? 1 : 2;
+      const row = pz > zb ? 0 : pz >= za ? 1 : 2;
+      return 1 + row * 3 + col;
+    }
+    return pz >= (Z0 + Z1) / 2 ? (px < 0 ? 11 : 12) : (px < 0 ? 13 : 14);
+  }
+
+  const COORDS = {
+    1: [-0.57, 3.17], 2: [0.00, 3.17], 3: [0.57, 3.17],
+    4: [-0.57, 2.50], 5: [0.00, 2.50], 6: [0.57, 2.50],
+    7: [-0.57, 1.83], 8: [0.00, 1.83], 9: [0.57, 1.83],
+    11: [-1.20, 3.80], 12: [1.20, 3.80],
+    13: [-1.20, 1.00], 14: [1.20, 1.00],
+  };
+
+  // 5×5 grid layout (from catcher's POV, left = negative plate_x)
+  const GRID = [
+    [11,   null, null, null, 12  ],
+    [null, 1,    2,    3,    null],
+    [null, 4,    5,    6,    null],
+    [null, 7,    8,    9,    null],
+    [13,   null, null, null, 14  ],
+  ];
+
+  const current = _activeZone(plateX, plateZ);
+
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "32px 1fr 1fr 1fr 32px",
+      gridTemplateRows: "24px 1fr 1fr 1fr 24px",
+      gap: 2, width: "100%",
+    }}>
+      {GRID.flat().map((zone, i) => {
+        if (zone === null) return <div key={i}/>;
+        const isBall   = zone > 9;
+        const isActive = zone === current;
+        return (
+          <button
+            key={zone}
+            onClick={() => { const [x, z] = COORDS[zone]; onSelect(x, z); }}
+            title={`Zone ${zone}  x=${COORDS[zone][0].toFixed(2)}  z=${COORDS[zone][1].toFixed(2)}`}
+            style={{
+              borderRadius: 4, padding: 0, cursor: "pointer",
+              fontFamily: "var(--pd-font-mono)", fontSize: 10, fontWeight: 700,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              border: `1.5px solid ${isActive ? ACCENT
+                : isBall ? "var(--pd-line-2)"
+                : "rgba(180,130,60,0.45)"}`,
+              background: isActive ? ACCENT
+                : isBall ? "rgba(100,120,200,0.07)"
+                : "rgba(212,165,116,0.16)",
+              color: isActive ? "#fff" : isBall ? "var(--pd-ink-4)" : "var(--pd-ink-2)",
+            }}
+          >
+            {zone}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main DebugView component ───────────────────────────────────────────────
 function DebugView({ allHitters, modelVersion = "v1" }) {
   const [unlocked,  setUnlocked] = useState(false);
@@ -1881,10 +1952,20 @@ function DebugView({ allHitters, modelVersion = "v1" }) {
           </div>
         </div>
 
-        {/* Location */}
+        {/* Location — zone picker + fine-tune */}
         <div style={{ marginBottom: 12 }}>
-          <div className="pd-eyebrow" style={{ marginBottom: 4 }}>Location (plate_x / plate_z)</div>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+            <div className="pd-eyebrow">Location</div>
+            <span style={{ fontSize: 10, color: "var(--pd-ink-4)", fontFamily: "var(--pd-font-mono)" }}>
+              x={plateX.toFixed(2)}  z={plateZ.toFixed(2)}
+            </span>
+          </div>
+          <ZonePicker
+            plateX={plateX}
+            plateZ={plateZ}
+            onSelect={(x, z) => { setPlateX(x); setPlateZ(z); }}
+          />
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 11, color: "var(--pd-ink-3)", width: 14 }}>X</span>
               <button style={stepBtn} onClick={() => setPlateX(v => Math.round((v - 0.1) * 10) / 10)}>−</button>
